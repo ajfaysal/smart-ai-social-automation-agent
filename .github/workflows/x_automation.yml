@@ -27,6 +27,11 @@ jobs:
     - name: Generate AI Post & Publish to X
       env:
         PREMIUM_API_KEY: ${{ secrets.PREMIUM_API_KEY }}
+        PREMIUM_API_URL: ${{ secrets.PREMIUM_API_URL }}
+        PREMIUM_MODEL: ${{ secrets.PREMIUM_MODEL }}
+        SYSTEM_PROMPT: ${{ secrets.SYSTEM_PROMPT }}
+        USER_PROMPT: ${{ secrets.USER_PROMPT }}
+        TWEETCLAW_RESEARCH_JSON: ${{ secrets.TWEETCLAW_RESEARCH_JSON }}
         X_COOKIES: ${{ secrets.X_COOKIES }}
         X_HEADLESS: 'true'
       run: python x_automation.py
