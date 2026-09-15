@@ -1,0 +1,21 @@
+name: Provider Reliability CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  provider-reliability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependency
+        run: python -m pip install --disable-pip-version-check pytest
+      - name: Syntax check
+        run: python -m py_compile provider_reliability.py test_provider_reliability.py
+      - name: Provider reliability tests
+        run: python -m pytest -q test_provider_reliability.py
