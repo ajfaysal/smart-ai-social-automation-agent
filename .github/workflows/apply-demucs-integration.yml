@@ -9,7 +9,6 @@ permissions:
 
 jobs:
   patch:
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore: wire Demucs') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,13 +25,13 @@ jobs:
           path = Path('drama_dubbing.py')
           text = path.read_text(encoding='utf-8')
 
-          import_anchor = 'from pathlib import Path\n'
-          import_add = (
-              'from pathlib import Path\n'
-              'from demucs_provider import separate as audited_demucs_separate\n'
-              'from provider_runtime import reset_provider_executions, snapshot\n'
-          )
           if 'from demucs_provider import separate as audited_demucs_separate' not in text:
+              import_anchor = 'from pathlib import Path\n'
+              import_add = (
+                  'from pathlib import Path\n'
+                  'from demucs_provider import separate as audited_demucs_separate\n'
+                  'from provider_runtime import reset_provider_executions, snapshot\n'
+              )
               if text.count(import_anchor) != 1:
                   raise SystemExit('Expected exactly one pathlib import anchor')
               text = text.replace(import_anchor, import_add, 1)
@@ -52,7 +51,7 @@ jobs:
           '''
           if old in text:
               text = text.replace(old, new, 1)
-          else:
+          elif 'def separate_background(source_audio,work):' in text and 'audited_demucs_separate(source_audio,work)' not in text:
               pattern = r'def separate_background\(source_audio,work\):\n.*?return fitted\n'
               match = re.search(pattern, text, flags=re.S)
               if not match:
@@ -61,17 +60,17 @@ jobs:
               text = text[:match.start()] + replacement + text[match.end():]
 
           dub_anchor = 'def dub_video(video_path,target_language,requested_voice="auto",preserve_background=True,add_mood_music=True,lip_sync=False):\n'
-          if dub_anchor not in text:
-              raise SystemExit('Could not locate dub_video safely')
-          if dub_anchor + '    reset_provider_executions()\n' not in text:
+          if 'reset_provider_executions()' not in text:
+              if dub_anchor not in text:
+                  raise SystemExit('Could not locate dub_video safely')
               text = text.replace(dub_anchor, dub_anchor + '    reset_provider_executions()\n', 1)
 
-          manifest_old = '"shot_qc":shot_qc,"quality_control":qc,"segments":manifest}'
-          manifest_new = '"shot_qc":shot_qc,"quality_control":qc,"provider_execution":snapshot(),"segments":manifest}'
-          if manifest_old in text and '"provider_execution":snapshot()' not in text:
+          if '"provider_execution":snapshot()' not in text:
+              manifest_old = '"shot_qc":shot_qc,"quality_control":qc,"segments":manifest}'
+              manifest_new = '"shot_qc":shot_qc,"quality_control":qc,"provider_execution":snapshot(),"segments":manifest}'
+              if manifest_old not in text:
+                  raise SystemExit('Could not locate final manifest safely')
               text = text.replace(manifest_old, manifest_new, 1)
-          elif '"provider_execution":snapshot()' not in text:
-              raise SystemExit('Could not locate final manifest safely')
 
           path.write_text(text, encoding='utf-8')
           PY
@@ -84,6 +83,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add drama_dubbing.py .github/workflows/apply-demucs-integration.yml
-          git diff --cached --quiet && exit 0
+          if git diff --cached --quiet; then
+            echo "Production integration already applied."
+            exit 0
+          fi
           git commit -m "chore: wire Demucs provider into production manifest"
           git push origin HEAD:feature/demucs-provider-audit
