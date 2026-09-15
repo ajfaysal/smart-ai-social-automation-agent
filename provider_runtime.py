@@ -1,31 +1,57 @@
-"""Runtime registry for auditable optional provider execution.
-
-The registry is process-local and intentionally lightweight. Providers register
-only after an explicit execution attempt; success is accepted only when the
-expected artifact validator passes. It is safe in credential-free CI.
-"""
+"""Request-scoped runtime registry for auditable provider execution."""
 from __future__ import annotations
 
+import contextvars
 import json
 from pathlib import Path
 from typing import Any
 
 from provider_reliability import ProviderExecution, ProviderState
 
-_EXECUTIONS: dict[str, ProviderExecution] = {}
+_EXECUTIONS: contextvars.ContextVar[dict[str, ProviderExecution] | None] = contextvars.ContextVar(
+    "provider_executions", default=None
+)
+
+
+def _registry() -> dict[str, ProviderExecution]:
+    registry = _EXECUTIONS.get()
+    if registry is None:
+        registry = {}
+        _EXECUTIONS.set(registry)
+    return registry
 
 
 def reset_provider_executions() -> None:
-    _EXECUTIONS.clear()
+    _EXECUTIONS.set({})
 
 
 def record(execution: ProviderExecution) -> ProviderExecution:
-    _EXECUTIONS[execution.provider] = execution
+    _registry()[execution.provider] = execution
     return execution
 
 
 def snapshot() -> dict[str, dict[str, Any]]:
-    return {name: execution.to_manifest() for name, execution in _EXECUTIONS.items()}
+    return {name: execution.to_manifest() for name, execution in _registry().items()}
+
+
+def validate_provider_snapshot(data: dict[str, dict[str, Any]]) -> tuple[bool, str]:
+    for provider, execution in data.items():
+        if not isinstance(execution, dict):
+            return False, f"invalid_execution:{provider}"
+        state = execution.get("state")
+        applied = execution.get("applied")
+        reason = execution.get("reason")
+        if not provider or state not in {s.value for s in ProviderState}:
+            return False, f"invalid_state:{provider}"
+        if not isinstance(applied, bool):
+            return False, f"invalid_applied:{provider}"
+        if applied and state != ProviderState.SUCCEEDED.value:
+            return False, f"applied_without_success:{provider}"
+        if state in {ProviderState.UNAVAILABLE.value, ProviderState.CONFIGURED.value,
+                     ProviderState.ATTEMPTED.value, ProviderState.FAILED.value,
+                     ProviderState.SKIPPED.value} and not isinstance(reason, str):
+            return False, f"missing_reason:{provider}"
+    return True, "provider_audit_valid"
 
 
 def validate_artifact(path: Path, *, min_bytes: int = 1, suffix: str | None = None) -> tuple[bool, str]:
@@ -62,5 +88,15 @@ def finalize(provider: str, *, configured: bool, attempted: bool,
     return record(ProviderExecution(provider, state, valid, validation_reason, version, capabilities))
 
 
+def skip_provider(provider: str, reason: str, *, version: str | None = None,
+                  capabilities: list[str] | None = None) -> ProviderExecution:
+    return record(ProviderExecution(provider, ProviderState.SKIPPED, False,
+                                    reason, version, capabilities or []))
+
+
 def write_snapshot(path: Path) -> None:
-    path.write_text(json.dumps(snapshot(), ensure_ascii=False, indent=2), encoding="utf-8")
+    data = snapshot()
+    valid, reason = validate_provider_snapshot(data)
+    if not valid:
+        raise ValueError(reason)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
