@@ -8,19 +8,16 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import tempfile
 
 import pytest
 
 from lip_sync_qc import validate_output
 from shot_qc import validate_reassembled, validate_shot_plan
 
-
 pytestmark = pytest.mark.integration
-
-
-def _tool_available(name: str) -> bool:
-    return subprocess.run(["sh", "-c", f"command -v {name}"], capture_output=True).returncode == 0
 
 
 def _make_fixture(path: Path, duration: float = 2.0) -> None:
@@ -39,29 +36,24 @@ def _make_fixture(path: Path, duration: float = 2.0) -> None:
 def test_real_media_qc_boundary():
     if os.getenv("RUN_REAL_MEDIA_VALIDATION") != "1":
         pytest.skip("opt-in: set RUN_REAL_MEDIA_VALIDATION=1")
-    if not (_tool_available("ffmpeg") and _tool_available("ffprobe")):
+    if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
         pytest.skip("ffmpeg/ffprobe unavailable")
 
-    from tempfile import TemporaryDirectory
-
-    with TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         media = root / "fixture.mp4"
         _make_fixture(media)
-
         shots = [
             {"start": 0.0, "end": 1.0, "index": 0},
             {"start": 1.0, "end": 2.0, "index": 1},
         ]
         validate_shot_plan(shots, 2.0)
         validate_reassembled(media, 2.0, shots)
-
         manifest = [
             {"index": 0, "start": 0.0, "end": 0.8, "drift_ms": 0.0},
             {"index": 1, "start": 1.0, "end": 2.0, "drift_ms": 5.0},
         ]
         qc = validate_output(media, 2.0, manifest)
-
         assert qc["status"] == "pass"
         assert qc["video_stream"] is True
         assert qc["audio_stream"] is True
