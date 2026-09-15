@@ -4,7 +4,8 @@ from __future__ import annotations
 import os
 
 from dataclasses import dataclass
-from provider_runtime import finalize
+from provider_runtime import finalize, record
+from provider_reliability import ProviderExecution, ProviderState
 
 
 @dataclass(frozen=True)
@@ -52,10 +53,11 @@ class MediaPipeLandmarkProvider(LandmarkProvider):
         return self._module is not None
 
     def detect(self, frame) -> LandmarkResult:
+        capabilities = ["face_landmarks", "mouth_landmarks"]
         if not self.available():
             reason = "MediaPipe is not installed."
             finalize(self.name, configured=False, attempted=False, reason=reason,
-                     capabilities=["face_landmarks", "mouth_landmarks"])
+                     capabilities=capabilities)
             return LandmarkResult(False, self.name, 0, False, 0.0, reason)
         try:
             import cv2
@@ -68,7 +70,7 @@ class MediaPipeLandmarkProvider(LandmarkProvider):
             if not faces:
                 reason = "No facial landmarks detected."
                 finalize(self.name, configured=True, attempted=True, reason=reason,
-                         capabilities=["face_landmarks", "mouth_landmarks"])
+                         capabilities=capabilities)
                 return LandmarkResult(True, self.name, 0, False, 0.0, reason)
             face = faces[0]
             points = [(float(p.x), float(p.y)) for p in face.landmark]
@@ -78,21 +80,16 @@ class MediaPipeLandmarkProvider(LandmarkProvider):
             confidence = 0.9 if visible else 0.25
             reason = "Facial landmarks and mouth region detected." if visible else "Face landmarks detected but mouth visibility is uncertain."
             if visible:
-                finalize(self.name, configured=True, attempted=True, artifact=None,
-                         reason=None, capabilities=["face_landmarks", "mouth_landmarks"])
-                # Landmark data is in-memory; a successful detection is the expected artifact.
-                from provider_runtime import record
-                from provider_reliability import ProviderExecution, ProviderState
                 record(ProviderExecution(self.name, ProviderState.SUCCEEDED, True, reason,
-                                         capabilities=["face_landmarks", "mouth_landmarks"]))
+                                         capabilities=capabilities))
             else:
                 finalize(self.name, configured=True, attempted=True, reason=reason,
-                         capabilities=["face_landmarks", "mouth_landmarks"])
+                         capabilities=capabilities)
             return LandmarkResult(True, self.name, len(faces), visible, confidence, reason, points)
         except Exception as exc:
             reason = f"Landmark detection error: {exc}"
             finalize(self.name, configured=True, attempted=True, reason=reason,
-                     capabilities=["face_landmarks", "mouth_landmarks"])
+                     capabilities=capabilities)
             return LandmarkResult(True, self.name, 0, False, 0.0, reason)
 
 
