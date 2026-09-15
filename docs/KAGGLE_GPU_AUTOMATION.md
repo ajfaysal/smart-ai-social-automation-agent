@@ -1,16 +1,17 @@
-# Kaggle GPU automation
+# Automatic Kaggle GPU dubbing
 
-`kaggle_gpu_orchestrator.py` is the API-driven launch layer for real-provider smoke execution.
+The Kaggle API is the remote execution trigger, not just a credential store.
 
-## What it does
+## Flow
 
-1. Reads the Kaggle credential from `KAGGLE_API_TOKEN` or `KAGGLE_API_KEY` at runtime.
-2. Generates a temporary Jupyter notebook from the repository revision.
-3. Creates Kaggle kernel metadata with GPU and internet enabled.
-4. Pushes the kernel through the Kaggle CLI, causing Kaggle to provision the GPU runtime.
-5. The kernel clones this repository, installs runtime dependencies, downloads the public Drive fixture, and FFprobe-validates it.
-
-Credentials, runtime media, and model checkpoints are never committed to Git.
+1. `kaggle_gpu_orchestrator.py` reads `KAGGLE_API_TOKEN` or `KAGGLE_API_KEY` from the runtime environment.
+2. It generates a temporary Kaggle notebook and kernel metadata with GPU + internet enabled.
+3. Kaggle provisions the remote GPU runtime.
+4. The runtime clones the selected repository revision.
+5. The runtime downloads the public Google Drive video and validates it with FFprobe.
+6. Demucs runs in the remote runtime and is audited only after its artifact validates.
+7. In `full` mode, MediaPipe and Wav2Lip execute when their runtime inputs/checkpoint are present; otherwise the run records that the provider was not executed instead of claiming success.
+8. Provider audit/QC remains fail-closed.
 
 ## Launch
 
@@ -21,16 +22,12 @@ python kaggle_gpu_orchestrator.py \
   --profile full
 ```
 
-For a local contract check without contacting Kaggle:
+No credential, video, cookie, or model checkpoint is written to Git.
 
-```bash
-python kaggle_gpu_orchestrator.py \
-  --video-url 'https://drive.google.com/file/d/FILE_ID/view?usp=sharing' \
-  --dry-run
-```
+## Wav2Lip runtime inputs
 
-## Provider execution
+Provide the model/checkpoint and input assets in the Kaggle runtime according to the existing Wav2Lip provider configuration. The orchestrator intentionally does not download an unverified third-party checkpoint or silently mark Wav2Lip as successful.
 
-The Kaggle kernel is the GPU execution layer; provider certification still follows the repository's fail-closed audit contract. Demucs, MediaPipe, and Wav2Lip must produce validated artifacts before they can be recorded as `SUCCEEDED`/`applied=true`.
+## Certification rule
 
-Wav2Lip model checkpoints remain operator-managed runtime assets. They are not bundled into Git and must be installed or supplied in the Kaggle runtime before Wav2Lip certification.
+A remote GPU job being launched is **not** itself provider certification. Certification requires real provider execution plus validated output artifacts and a matching audit manifest.
