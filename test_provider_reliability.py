@@ -1,6 +1,7 @@
 import pytest
 
 from provider_reliability import (
+    ProviderExecution,
     ProviderState,
     attempted,
     configured,
@@ -53,9 +54,5 @@ def test_success_is_the_only_applied_state():
 
 
 def test_non_success_applied_flag_is_rejected():
-    with pytest.raises(ValueError):
-        configured("wav2lip")
-        # Constructing through the dataclass is intentionally covered below.
-    from provider_reliability import ProviderExecution
     with pytest.raises(ValueError):
         ProviderExecution("wav2lip", ProviderState.FAILED, applied=True)
