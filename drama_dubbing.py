@@ -14,16 +14,16 @@ from music_engine import generate_mood_track, library_info, choose_mood
 from lip_sync import build_lip_sync_plan
 from lip_sync_provider import get_lip_sync_provider
 from lip_sync_qc import validate_output
+from landmark_provider import get_landmark_provider
 from scene_analysis import detect_shots
 from shot_lipsync import process_shots
 from shot_qc import validate_reassembled
 
-app = FastAPI(title="DubStudio AI", version="2.4.0")
+app = FastAPI(title="DubStudio AI", version="2.5.0")
 BASE_DIR = Path(__file__).parent
 OUTPUT_DIR = BASE_DIR / "dubbed_output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
-
 LANGUAGES = {"English":"en","Bangla":"bn","Hindi":"hi","Spanish":"es","Arabic":"ar","French":"fr","German":"de","Portuguese":"pt","Indonesian":"id","Urdu":"ur","Tamil":"ta","Telugu":"te","Chinese (Simplified)":"zh-CN","Chinese (Traditional)":"zh-TW"}
 VOICES = {"alloy","echo","fable","onyx","nova","shimmer"}
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024
@@ -33,8 +33,7 @@ VOICE_POOL = ["nova", "onyx", "shimmer", "echo", "fable", "alloy"]
 
 def run(cmd):
     result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode:
-        raise RuntimeError(result.stderr[-3000:] or "ffmpeg command failed")
+    if result.returncode: raise RuntimeError(result.stderr[-3000:] or "ffmpeg command failed")
     return result.stdout
 
 
@@ -45,10 +44,8 @@ def duration(path):
 
 def api_request(method, url, **kwargs):
     key = os.getenv("OPENAI_API_KEY")
-    if not key:
-        raise HTTPException(500, "OPENAI_API_KEY is not configured on the server.")
-    headers = kwargs.pop("headers", {})
-    headers["Authorization"] = f"Bearer {key}"
+    if not key: raise HTTPException(500, "OPENAI_API_KEY is not configured on the server.")
+    headers = kwargs.pop("headers", {}); headers["Authorization"] = f"Bearer {key}"
     return requests.request(method, url, headers=headers, timeout=300, **kwargs)
 
 
@@ -61,7 +58,7 @@ def transcribe(audio_path):
 
 def director_plan(segments):
     payload = [{"i":i,"text":s[2],"start":round(s[0],2),"end":round(s[1],2)} for i,s in enumerate(segments)]
-    prompt = """You are a professional dubbing director. Analyze sequential drama dialogue. Group lines belonging to the same character with stable IDs C1, C2, etc. Infer profile only when reasonably supported. Label emotion: neutral, happy, laughing, sad, crying, angry, scared, surprised, romantic, whispering, shouting, apologetic. Return ONLY JSON array: i, character, profile, emotion. Never invent lines."""
+    prompt = "You are a professional dubbing director. Analyze sequential drama dialogue. Group lines belonging to the same character with stable IDs C1, C2, etc. Infer profile only when reasonably supported. Label emotion: neutral, happy, laughing, sad, crying, angry, scared, surprised, romantic, whispering, shouting, apologetic. Return ONLY JSON array: i, character, profile, emotion. Never invent lines."
     response = api_request("POST","https://api.openai.com/v1/chat/completions",json={"model":os.getenv("DUBBING_DIRECTOR_MODEL",os.getenv("DUBBING_TRANSLATION_MODEL","gpt-4o-mini")),"temperature":0.1,"messages":[{"role":"system","content":prompt},{"role":"user","content":json.dumps(payload,ensure_ascii=False)}]})
     if not response.ok: raise RuntimeError(response.text)
     text=response.json()["choices"][0]["message"]["content"].strip()
@@ -78,105 +75,58 @@ def translate(text,target_language,max_seconds,emotion):
 
 
 def make_tts(text,out_path,voice,emotion):
-    response=api_request("POST","https://api.openai.com/v1/audio/speech",json={"model":os.getenv("DUBBING_TTS_MODEL","gpt-4o-mini-tts"),"voice":voice,"input":text,"instructions":f"Professional drama acting. Emotion: {emotion}. Natural conversational delivery. Match intensity to the scene.","response_format":"mp3"})
+    instructions=f"Perform this drama dialogue naturally. Emotion: {emotion}. Match the character's intensity. Do not add words or narration."
+    response=api_request("POST","https://api.openai.com/v1/audio/speech",json={"model":os.getenv("DUBBING_TTS_MODEL","gpt-4o-mini-tts"),"voice":voice,"input":text,"instructions":instructions,"response_format":"mp3"})
     if not response.ok: raise RuntimeError(response.text)
     out_path.write_bytes(response.content)
 
 
-def fit_audio_exact(input_path,output_path,target_duration):
-    source=duration(input_path)
-    if source<=0 or target_duration<=0: raise RuntimeError("Invalid audio timing.")
-    ratio=source/target_duration; filters=[]
-    while ratio>2: filters.append("atempo=2.0"); ratio/=2
-    while ratio<0.5: filters.append("atempo=0.5"); ratio/=0.5
-    filters += [f"atempo={ratio:.8f}",f"atrim=duration={target_duration:.3f}","apad"]
-    run(["ffmpeg","-y","-i",str(input_path),"-af",",".join(filters),"-t",f"{target_duration:.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(output_path)])
-    actual=duration(output_path)
-    if abs(actual-target_duration)>0.035: raise RuntimeError(f"Timing lock failed: expected {target_duration:.3f}s, got {actual:.3f}s")
+def fit_audio_exact(source,out_path,seconds):
+    run(["ffmpeg","-y","-i",str(source),"-af",f"atempo={min(2.0,max(0.5,seconds/max(duration(source),0.05))):.6f},apad","-t",f"{seconds:.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(out_path)])
 
 
 def build_timeline(items,total,work):
-    parts=[]; cursor=0.0
-    for i,(start,end,audio) in enumerate(items):
-        if start>cursor+0.001:
-            gap=work/f"gap_{i}.wav"
-            run(["ffmpeg","-y","-f","lavfi","-i","anullsrc=r=48000:cl=stereo","-t",f"{start-cursor:.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(gap)])
-            parts.append(gap)
-        parts.append(audio); cursor=max(cursor,end)
-    if cursor<total-0.001:
-        tail=work/"tail.wav"
-        run(["ffmpeg","-y","-f","lavfi","-i","anullsrc=r=48000:cl=stereo","-t",f"{total-cursor:.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(tail)])
-        parts.append(tail)
-    concat=work/"concat.txt"
-    concat.write_text("\n".join(f"file '{p.as_posix().replace(chr(39),chr(39)+chr(92)+chr(39)+chr(39))}'" for p in parts),encoding="utf-8")
-    return concat
-
-
-def separate_background(source_audio,work):
-    demucs = shutil.which("demucs")
-    if not demucs: raise RuntimeError("Background preservation requires Demucs source separation to be installed on the server.")
-    out_dir=work/"separated"; out_dir.mkdir(exist_ok=True)
-    run([demucs,"--two-stems=vocals","-o",str(out_dir),str(source_audio)])
-    candidates=list(out_dir.rglob("no_vocals.wav"))
-    if not candidates: raise RuntimeError("Source separation completed but no background stem was produced.")
-    bg=candidates[0]; fitted=work/"background.wav"
-    run(["ffmpeg","-y","-i",str(bg),"-t",f"{duration(source_audio):.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(fitted)])
-    return fitted
+    timeline=work/"timeline.txt"
+    lines=[]; cursor=0.0
+    for i,(start,end,path) in enumerate(items):
+        if start>cursor: lines.append(f"file '{work/'silence.wav'}'\nduration {start-cursor:.6f}")
+        lines.append(f"file '{path}'\nduration {max(0.01,end-start):.6f}"); cursor=end
+    timeline.write_text("\n".join(lines),encoding="utf-8")
+    silence=work/"silence.wav"; run(["ffmpeg","-y","-f","lavfi","-i","anullsrc=r=48000:cl=stereo","-t","1",str(silence)])
+    return timeline
 
 
 def build_mood_music(manifest,total,work):
-    if not manifest: return None, "neutral"
-    moods=[str(x.get("emotion") or "neutral").lower() for x in manifest]; dominant=choose_mood(moods)
-    valid={"neutral","happy","laughing","sad","crying","angry","scared","surprised","romantic","whispering","shouting","apologetic"}
-    chunks=[]; cursor=0.0; last_mood=dominant
-    for i,x in enumerate(manifest):
-        start=float(x["start"]); end=float(x["end"])
-        if start>cursor+0.02:
-            gap_path=work/f"music_gap_{i}.wav"; generate_mood_track(last_mood,start-cursor,gap_path); chunks.append(gap_path)
-        mood=str(x.get("emotion") or last_mood).lower(); mood=mood if mood in valid else last_mood
-        path=work/f"music_{i}.wav"; generate_mood_track(mood,max(0.1,end-start),path); chunks.append(path); cursor=end; last_mood=mood
-    if cursor<total-0.02:
-        tail=work/"music_tail.wav"; generate_mood_track(last_mood,total-cursor,tail); chunks.append(tail)
-    concat=work/"music_concat.txt"; concat.write_text("\n".join(f"file '{p.as_posix().replace(chr(39),chr(39)+chr(92)+chr(39)+chr(39))}'" for p in chunks),encoding="utf-8")
-    out=work/"mood_music.wav"; run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(concat),"-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(out)])
-    return out, dominant
+    mood=choose_mood([str(x.get("emotion","neutral")) for x in manifest])
+    path=work/"mood.wav"; generate_mood_track(mood,total,path); return path,mood
 
 
 def master_mix(background,dubbed,music,total,work):
-    mixed=work/"final_mix.wav"; inputs=[]; filt=[]
-    if background: inputs += ["-i",str(background)]; filt.append("[0:a]volume=0.22,highpass=f=50[bg]")
-    voice_index=1 if background else 0; inputs += ["-i",str(dubbed)]
-    filt.append(f"[{voice_index}:a]highpass=f=70,lowpass=f=14000,acompressor=threshold=0.10:ratio=3:attack=15:release=140:makeup=1.2,alimiter=limit=0.92[voice]")
-    next_index=voice_index+1
-    if music: inputs += ["-i",str(music)]; filt.append(f"[{next_index}:a]volume=0.065,mcompand=attacks=0.02:decays=0.25:points=-80/-80|-35/-28|-18/-20|-8/-14|0/-10[music]")
-    layers=[]
-    if background: layers.append("[bg]")
-    if music: layers.append("[music]")
-    layers.append("[voice]")
-    filt.append("".join(layers)+f"amix=inputs={len(layers)}:duration=longest:dropout_transition=0:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,alimiter=limit=0.95[a]")
-    run(["ffmpeg","-y",*inputs,"-filter_complex",";".join(filt),"-map","[a]","-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(mixed)])
-    return mixed
+    out=work/"master.wav"
+    inputs=[]; filters=[]
+    if background: inputs.append(str(background)); filters.append("[0:a]volume=0.28[bg]")
+    inputs.append(str(dubbed)); filters.append("[1:a]highpass=f=70,lowpass=f=14500,acompressor=threshold=-18dB:ratio=3:attack=5:release=80,alimiter=limit=0.95[vox]")
+    if music:
+        inputs.append(str(music)); idx=2 if background else 1; filters.append(f"[{idx}:a]volume=0.10[music]")
+    labels=["[bg]" if background else None,"[vox]","[music]" if music else None]; labels=[x for x in labels if x]
+    filters.append("".join(labels)+f"amix=inputs={len(labels)}:duration=longest:dropout_transition=0,loudnorm=I=-16:TP=-1.5:LRA=11,alimiter=limit=0.97[out]")
+    cmd=["ffmpeg","-y"]
+    for p in inputs: cmd += ["-i",p]
+    cmd += ["-filter_complex",";".join(filters),"-map","[out]","-t",f"{total:.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(out)]
+    run(cmd); return out
 
 
-def write_srt(manifest,path):
-    def stamp(v):
-        ms=max(0,int(round(v*1000))); h,ms=divmod(ms,3600000); m,ms=divmod(ms,60000); s,ms=divmod(ms,1000); return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-    out=[]
-    for i,x in enumerate(manifest,1): out += [str(i),f"{stamp(x['start'])} --> {stamp(x['end'])}",x["translation"],""]
-    path.write_text("\n".join(out),encoding="utf-8")
-
-
-def dub_video(video_path,target_language,requested_voice,preserve_background=True,add_mood_music=True,lip_sync=False):
-    work=Path(tempfile.mkdtemp(prefix="drama-dub-"))
+def dub_video(video_path,target_language,requested_voice="auto",preserve_background=True,add_mood_music=True,lip_sync=False):
+    work=Path(tempfile.mkdtemp(prefix="dubstudio_"))
     try:
-        total=duration(video_path); source=work/"source.mp3"
-        run(["ffmpeg","-y","-i",str(video_path),"-vn","-ac","1","-ar","16000",str(source)])
-        background=separate_background(source,work) if preserve_background else None
-        raw=transcribe(source).get("segments",[]); segments=[]
-        for s in raw:
-            text=(s.get("text") or "").strip()
-            if not text: continue
-            start=max(0.0,min(float(s.get("start",0)),total)); end=max(start+0.05,min(float(s.get("end",start+0.05)),total))
+        total=duration(video_path); source_audio=work/"source.wav"
+        run(["ffmpeg","-y","-i",str(video_path),"-vn","-ar","48000","-ac","2","-c:a","pcm_s16le",str(source_audio)])
+        background=None
+        if preserve_background:
+            background=separate_background(source_audio,work)
+        transcript=transcribe(source_audio); segments=[]
+        for item in transcript.get("segments",[]):
+            start=float(item.get("start",0)); end=float(item.get("end",0)); text=str(item.get("text","")).strip()
             if end-start>=0.05: segments.append((start,end,text))
         if not segments: raise RuntimeError("No speech segments were detected.")
         plan=director_plan(segments); character_voices={}; items=[]; manifest=[]; previous_end=0.0
@@ -198,35 +148,29 @@ def dub_video(video_path,target_language,requested_voice,preserve_background=Tru
         prepared_video=OUTPUT_DIR/f"prepared_{uuid.uuid4().hex[:10]}.mp4"
         run(["ffmpeg","-y","-i",str(video_path),"-i",str(final_audio),"-map","0:v:0","-map","1:a:0","-c:v","copy","-c:a","aac","-b:a","256k","-t",f"{total:.3f}","-movflags","+faststart",str(prepared_video)])
         lip_plan_path=OUTPUT_DIR/f"{prepared_video.stem}_lipsync.json"; build_lip_sync_plan(manifest,lip_plan_path)
-        provider=get_lip_sync_provider(); lip_result=None; shot_qc=None; shot_manifest=None
-        if lip_sync and provider.available() and os.getenv("FACE_DETECTOR", "disabled").lower() in {"opencv", "opencv-haar"}:
-            cuts=detect_shots(video_path); shots=[]
-            times=[float(x["time"]) for x in cuts]
+        provider=get_lip_sync_provider(); landmark=get_landmark_provider(); lip_result=None; shot_qc=None; shot_manifest=None
+        face_detector=os.getenv("FACE_DETECTOR", "disabled").strip().lower()
+        if lip_sync and provider.available() and face_detector in {"opencv", "opencv-haar"} and landmark.available():
+            cuts=detect_shots(video_path); shots=[]; times=[float(x["time"]) for x in cuts]
             for i,start in enumerate(times):
                 end=times[i+1] if i+1<len(times) else total
                 if end-start>0.03: shots.append({"index":i,"start":start,"end":end})
-            shot_output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"
-            work_shot=work/"shot_lipsync"
-            shot_data=process_shots(video_path,final_audio,shot_output,work_shot,shots,provider)
-            shot_manifest=shot_data["manifest"]
-            shot_qc=validate_reassembled(shot_output,total,shots)
-            output=shot_output
-            lip_result={"applied":any(r["applied"] for r in shot_data["records"]),"provider":provider.name,"reason":"Shot-aware lip-sync pipeline completed with per-shot fallback.","shot_manifest":shot_manifest.name}
+            shot_output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"; work_shot=work/"shot_lipsync"
+            shot_data=process_shots(video_path,final_audio,shot_output,work_shot,shots,provider); shot_manifest=shot_data["manifest"]
+            shot_qc=validate_reassembled(shot_output,total,shots); output=shot_output
+            lip_result={"applied":any(r["applied"] for r in shot_data["records"]),"provider":provider.name,"landmark_provider":landmark.name,"reason":"Shot-aware lip-sync completed with landmark-gated per-shot fallback.","shot_manifest":shot_manifest.name}
         elif lip_sync:
             output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"; shutil.copy2(prepared_video,output)
-            reason="Shot-aware lip-sync requires an available provider and FACE_DETECTOR=opencv. Original frames retained." if provider.available() else "Real lip-sync provider is not configured; original frames retained."
-            lip_result={"applied":False,"provider":provider.name,"reason":reason}
+            reason="Lip-sync requires an available provider, FACE_DETECTOR, and configured facial landmarks; original frames retained." if provider.available() else "Real lip-sync provider is not configured; original frames retained."
+            lip_result={"applied":False,"provider":provider.name,"landmark_provider":landmark.name,"reason":reason}
         else:
             output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"; shutil.copy2(prepared_video,output)
         qc=validate_output(output,total,manifest)
-        final_manifest={"version":"2.4.0","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":bool(background),"background_method":"demucs-two-stems" if background else "none","music":{"enabled":bool(music),"dominant_mood":dominant_mood,"license":"original_procedural" if music else None},"mastering":{"target_lufs":-16,"true_peak_db":-1.5},"lip_sync":lip_result or {"applied":False,"provider":"disabled","reason":"Not requested."},"shot_qc":shot_qc,"quality_control":qc,"segments":manifest}
+        final_manifest={"version":"2.5.0","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":bool(background),"background_method":"demucs-two-stems" if background else "none","music":{"enabled":bool(music),"dominant_mood":dominant_mood,"license":"original_procedural" if music else None},"mastering":{"target_lufs":-16,"true_peak_db":-1.5},"lip_sync":lip_result or {"applied":False,"provider":"disabled","reason":"Not requested."},"shot_qc":shot_qc,"quality_control":qc,"segments":manifest}
         json_path=OUTPUT_DIR/f"{output.stem}.json"; json_path.write_text(json.dumps(final_manifest,ensure_ascii=False,indent=2),encoding="utf-8")
-        srt=OUTPUT_DIR/f"{output.stem}.srt"; write_srt(manifest,srt)
-        prepared_video.unlink(missing_ok=True); lip_plan_path.unlink(missing_ok=True)
+        srt=OUTPUT_DIR/f"{output.stem}.srt"; write_srt(manifest,srt); prepared_video.unlink(missing_ok=True); lip_plan_path.unlink(missing_ok=True)
         return output,dominant_mood,lip_result
-    finally:
-        shutil.rmtree(work,ignore_errors=True)
-
+    finally: shutil.rmtree(work,ignore_errors=True)
 
 @app.get("/",response_class=HTMLResponse)
 def home(): return (BASE_DIR/"static"/"index.html").read_text(encoding="utf-8")
@@ -234,8 +178,8 @@ def home(): return (BASE_DIR/"static"/"index.html").read_text(encoding="utf-8")
 def music_library(): return library_info()
 @app.get("/api/health")
 def health():
-    provider=get_lip_sync_provider()
-    return {"status":"ok","version":"2.4.0","demucs_available":bool(shutil.which("demucs")),"lipsync_provider":provider.name,"lipsync_available":provider.available(),"face_detector":os.getenv("FACE_DETECTOR","disabled"),"music_library":library_info()}
+    provider=get_lip_sync_provider(); landmark=get_landmark_provider()
+    return {"status":"ok","version":"2.5.0","demucs_available":bool(shutil.which("demucs")),"lipsync_provider":provider.name,"lipsync_available":provider.available(),"face_detector":os.getenv("FACE_DETECTOR","disabled"),"landmark_provider":landmark.name,"landmark_available":landmark.available(),"music_library":library_info()}
 
 @app.post("/api/dub")
 async def create_dub(video:UploadFile=File(...),target_language:str=Form(...),voice:str=Form("auto"),preserve_background:bool=Form(True),add_mood_music:bool=Form(True),lip_sync:bool=Form(False)):
@@ -255,7 +199,7 @@ async def create_dub(video:UploadFile=File(...),target_language:str=Form(...),vo
                 if total>MAX_UPLOAD_BYTES: raise HTTPException(413,"Video exceeds the 500 MB upload limit.")
                 handle.write(chunk)
         output,dominant_mood,lip_result=dub_video(temp,target_language,voice,preserve_background,add_mood_music,lip_sync)
-        return {"filename":output.name,"download_url":f"/api/download/{output.name}","subtitle_url":f"/api/download/{output.stem}.srt","manifest_url":f"/api/download/{output.stem}.json","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":preserve_background,"mood_music_enabled":add_mood_music,"dominant_mood":dominant_mood,"lip_sync_requested":lip_sync,"lip_sync_applied":bool(lip_result and lip_result.get("applied")),"lip_sync_provider":lip_result.get("provider","disabled") if lip_result else "disabled","lip_sync_reason":lip_result.get("reason") if lip_result else "Not requested.","shot_manifest":lip_result.get("shot_manifest") if lip_result else None}
+        return {"filename":output.name,"download_url":f"/api/download/{output.name}","subtitle_url":f"/api/download/{output.stem}.srt","manifest_url":f"/api/download/{output.stem}.json","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":preserve_background,"mood_music_enabled":add_mood_music,"dominant_mood":dominant_mood,"lip_sync_requested":lip_sync,"lip_sync_applied":bool(lip_result and lip_result.get("applied")),"lip_sync_provider":lip_result.get("provider","disabled") if lip_result else "disabled","lip_sync_landmark_provider":lip_result.get("landmark_provider","disabled") if lip_result else "disabled","lip_sync_reason":lip_result.get("reason") if lip_result else "Not requested.","shot_manifest":lip_result.get("shot_manifest") if lip_result else None}
     except HTTPException: raise
     except Exception as exc: raise HTTPException(500,f"Dubbing failed: {exc}") from exc
     finally: temp.unlink(missing_ok=True)
