@@ -78,6 +78,7 @@ def process_shots(video: Path, dubbed_audio: Path, output: Path, work_dir: Path,
                 parts.append(source_part); continue
         normalized = work_dir / f"shot_{idx:05d}_final.mp4"
         _normalize_video(chosen, normalized)
+        parts.append(normalized)
         records.append({"shot":idx,"start":start,"end":end,"eligible":bool(eligibility.get("eligible")),"status":status,
                         "provider":getattr(provider,"name","unknown"),"reason":result.reason if result else eligibility.get("reason","Provider not run."),"output":normalized.name})
 
