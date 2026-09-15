@@ -1,9 +1,4 @@
-"""Configurable real-video lip-sync provider boundary.
-
-The default provider is disabled unless a real engine is explicitly configured.
-This prevents the application from claiming lip-sync when it has only achieved
-voice timing alignment.
-"""
+"""Configurable real-video lip-sync provider boundary with execution audit."""
 from __future__ import annotations
 
 import os
@@ -11,6 +6,8 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from provider_runtime import finalize
 
 
 @dataclass(frozen=True)
@@ -35,6 +32,7 @@ class DisabledLipSyncProvider(LipSyncProvider):
     name = "disabled"
 
     def apply(self, video_path: Path, audio_path: Path, output_path: Path) -> LipSyncResult:
+        finalize(self.name, configured=False, attempted=False, reason="No real lip-sync engine is configured.")
         return LipSyncResult(video_path, False, self.name, "No real lip-sync engine is configured.")
 
 
@@ -54,21 +52,31 @@ class Wav2LipProvider(LipSyncProvider):
         return bool(shutil.which(self.command) and self.model and Path(self.model).is_file())
 
     def apply(self, video_path: Path, audio_path: Path, output_path: Path) -> LipSyncResult:
+        configured = bool(self.model)
         if not self.available():
-            return LipSyncResult(video_path, False, self.name, "Wav2Lip command/model is not configured.")
-        command = [
-            self.command,
-            "--video", str(video_path),
-            "--audio", str(audio_path),
-            "--checkpoint", self.model,
-            "--outfile", str(output_path),
-        ]
-        completed = subprocess.run(command, capture_output=True, text=True)
-        if completed.returncode != 0:
-            raise RuntimeError(completed.stderr[-4000:] or "Wav2Lip execution failed.")
-        if not output_path.exists():
-            raise RuntimeError("Wav2Lip completed without producing an output video.")
-        return LipSyncResult(output_path, True, self.name, "Real video lip-sync applied.")
+            reason = "Wav2Lip command/model is not configured."
+            finalize(self.name, configured=configured, attempted=False, reason=reason,
+                     capabilities=["video_lip_sync"])
+            return LipSyncResult(video_path, False, self.name, reason)
+        try:
+            command = [
+                self.command, "--video", str(video_path), "--audio", str(audio_path),
+                "--checkpoint", self.model, "--outfile", str(output_path),
+            ]
+            completed = subprocess.run(command, capture_output=True, text=True)
+            if completed.returncode != 0:
+                reason = completed.stderr[-4000:] or "Wav2Lip execution failed."
+                finalize(self.name, configured=True, attempted=True, reason=reason,
+                         capabilities=["video_lip_sync"])
+                raise RuntimeError(reason)
+            execution = finalize(self.name, configured=True, attempted=True,
+                                 artifact=output_path, min_bytes=1024, suffix=".mp4",
+                                 capabilities=["video_lip_sync"])
+            if not execution.applied:
+                raise RuntimeError(f"Wav2Lip artifact validation failed: {execution.reason}")
+            return LipSyncResult(output_path, True, self.name, "Real video lip-sync applied and artifact validated.")
+        except Exception:
+            raise
 
 
 def get_lip_sync_provider() -> LipSyncProvider:
