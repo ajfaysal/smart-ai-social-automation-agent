@@ -13,6 +13,7 @@ from pathlib import Path
 from demucs_provider import separate
 from landmark_provider import get_landmark_provider
 from lip_sync_provider import get_lip_sync_provider
+from provider_media_validation import validate_video_audio
 from provider_runtime import reset_provider_executions, snapshot, validate_provider_snapshot
 
 
@@ -46,7 +47,9 @@ def run_wav2lip(video: Path, audio: Path, output: Path) -> dict:
     audit = snapshot()
     if not result.applied:
         raise RuntimeError(result.reason)
-    return {"output": str(result.output_path), "provider_execution": audit}
+    media = validate_video_audio(result.output_path)
+    return {"output": str(result.output_path), "media_validation": media,
+            "provider_execution": audit}
 
 
 def main() -> int:
