@@ -5,6 +5,8 @@ from pathlib import Path
 import json
 import subprocess
 
+from provider_runtime import snapshot
+
 
 def _run(args: list[str]) -> None:
     completed = subprocess.run(args, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -42,9 +44,8 @@ def _concat(parts: list[Path], output: Path) -> None:
 def process_shots(video: Path, dubbed_audio: Path, output: Path, work_dir: Path, shots: list[dict], provider, face_tracks: list[dict] | None = None) -> dict:
     """Process eligible shots and return a video-only reassembled timeline.
 
-    If no precomputed face tracks are supplied, each shot is evaluated here.
-    The dubbed audio is never embedded in intermediates; the caller attaches the
-    single global mastered timeline after visual reassembly.
+    Real provider failures are fail-closed per shot. The provider runtime
+    registry is persisted into the shot manifest for auditability.
     """
     work_dir.mkdir(parents=True, exist_ok=True)
     parts: list[Path] = []
@@ -84,7 +85,8 @@ def process_shots(video: Path, dubbed_audio: Path, output: Path, work_dir: Path,
     if not parts: raise ValueError("No shots available for reassembly.")
     _concat(parts, output)
     manifest = work_dir / "shot_lipsync_manifest.json"
-    manifest.write_text(json.dumps({"version":"1.2","mode":"shot-aware","video_only_reassembly":True,
+    manifest.write_text(json.dumps({"version":"1.3","mode":"shot-aware","video_only_reassembly":True,
                                     "records":records,"applied_shots":sum(r["status"]=="applied" for r in records),
-                                    "eligible_shots":sum(r["eligible"] for r in records),"total_shots":len(records)}, indent=2), encoding="utf-8")
+                                    "eligible_shots":sum(r["eligible"] for r in records),"total_shots":len(records),
+                                    "provider_execution":snapshot()}, indent=2), encoding="utf-8")
     return {"output_path":output,"manifest":manifest,"records":records}
