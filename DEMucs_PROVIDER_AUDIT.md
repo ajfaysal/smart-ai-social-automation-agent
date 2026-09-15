@@ -18,3 +18,7 @@ Only a validated `succeeded` execution can have `applied: true`.
 The provider never treats a successful process exit as sufficient. Missing or invalid background output fails closed, preventing the manifest from claiming that background preservation succeeded when it did not.
 
 The deterministic tests do not download model weights or call external services.
+
+## Integration status
+
+This module is the audited provider boundary. The remaining integration step is to replace the legacy `separate_background()` implementation in `drama_dubbing.py` with this boundary and include the runtime snapshot in the top-level final manifest.
