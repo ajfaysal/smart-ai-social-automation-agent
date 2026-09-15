@@ -13,6 +13,21 @@ on:
           - demucs
           - mediapipe
           - wav2lip
+      media_path:
+        description: Runner-local media path (audio for Demucs, image for MediaPipe, video for Wav2Lip)
+        required: false
+        default: ''
+        type: string
+      audio_path:
+        description: Runner-local audio path for Wav2Lip
+        required: false
+        default: ''
+        type: string
+      output_path:
+        description: Runner-local MP4 output path for Wav2Lip
+        required: false
+        default: 'provider-validation-work/wav2lip-output.mp4'
+        type: string
 
 jobs:
   validate:
@@ -22,17 +37,46 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install test dependency
+      - name: Install credential-free validation dependencies
         run: python -m pip install --disable-pip-version-check pytest
-      - name: Run credential-free validation contract tests
-        run: pytest -q test_real_provider_validation.py test_provider_reliability.py
-      - name: Report selected real-provider profile
+      - name: Run deterministic contract tests
+        run: pytest -q test_real_provider_validation.py test_provider_reliability.py test_provider_runtime.py
+      - name: Run dry-run profile
+        if: inputs.provider == 'dry-run'
         run: |
           mkdir -p validation-artifacts
-          printf 'selected_provider=%s\n' '${{ inputs.provider }}' > validation-artifacts/profile.txt
-          printf 'real model execution is intentionally opt-in and requires provider-specific setup.\n' >> validation-artifacts/profile.txt
-      - name: Upload validation artifacts
+          printf 'selected_provider=dry-run\nstatus=contract-tests-only\n' > validation-artifacts/profile.txt
+      - name: Run Demucs production profile
+        if: inputs.provider == 'demucs'
+        env:
+          MEDIA_PATH: ${{ inputs.media_path }}
+        run: |
+          test -n "$MEDIA_PATH" || { echo 'media_path is required for demucs'; exit 2; }
+          python real_provider_runner.py demucs --audio "$MEDIA_PATH" --work provider-validation-work > validation-artifacts.json
+      - name: Run MediaPipe production profile
+        if: inputs.provider == 'mediapipe'
+        env:
+          MEDIA_PATH: ${{ inputs.media_path }}
+        run: |
+          test -n "$MEDIA_PATH" || { echo 'media_path is required for mediapipe'; exit 2; }
+          MOUTH_LANDMARK_PROVIDER=mediapipe python real_provider_runner.py mediapipe --image "$MEDIA_PATH" > validation-artifacts.json
+      - name: Run Wav2Lip production profile
+        if: inputs.provider == 'wav2lip'
+        env:
+          VIDEO_PATH: ${{ inputs.media_path }}
+          AUDIO_PATH: ${{ inputs.audio_path }}
+          OUTPUT_PATH: ${{ inputs.output_path }}
+          LIPSYNC_PROVIDER: wav2lip
+        run: |
+          test -n "$VIDEO_PATH" || { echo 'media_path is required for wav2lip video'; exit 2; }
+          test -n "$AUDIO_PATH" || { echo 'audio_path is required for wav2lip'; exit 2; }
+          python real_provider_runner.py wav2lip --video "$VIDEO_PATH" --audio "$AUDIO_PATH" --output "$OUTPUT_PATH" > validation-artifacts.json
+      - name: Upload validation report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: real-provider-validation
-          path: validation-artifacts/
+          name: real-provider-validation-${{ inputs.provider }}
+          path: |
+            validation-artifacts/
+            validation-artifacts.json
+          if-no-files-found: ignore
