@@ -1,5 +1,7 @@
 import json, os, shutil, subprocess, tempfile, uuid
 from pathlib import Path
+from demucs_provider import separate as audited_demucs_separate
+from provider_runtime import reset_provider_executions, snapshot
 import requests
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
@@ -81,13 +83,8 @@ def build_timeline(items,total,work):
     listing=work/"concat.txt"; listing.write_text("\n".join(f"file '{p.as_posix().replace(chr(39),chr(39)+chr(92)+chr(39)+chr(39))}'" for p in parts),encoding="utf-8"); return listing
 
 def separate_background(source_audio,work):
-    demucs=shutil.which("demucs")
-    if not demucs: raise RuntimeError("Background preservation requires Demucs source separation to be installed on the server.")
-    out_dir=work/"separated"; out_dir.mkdir(exist_ok=True)
-    run([demucs,"--two-stems=vocals","-o",str(out_dir),str(source_audio)])
-    candidates=list(out_dir.rglob("no_vocals.wav"))
-    if not candidates: raise RuntimeError("Source separation completed but no background stem was produced.")
-    fitted=work/"background.wav"; run(["ffmpeg","-y","-i",str(candidates[0]),"-t",f"{duration(source_audio):.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(fitted)]); return fitted
+    separated=audited_demucs_separate(source_audio,work)
+    fitted=work/"background.wav"; run(["ffmpeg","-y","-i",str(separated),"-t",f"{duration(source_audio):.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(fitted)]); return fitted
 
 def build_mood_music(manifest,total,work):
     if not manifest:return None,"neutral"
@@ -119,6 +116,7 @@ def write_srt(manifest,path):
     path.write_text("\n".join(sum(([str(i),f"{stamp(x['start'])} --> {stamp(x['end'])}",x['translation'],""] for i,x in enumerate(manifest,1)),[])),encoding="utf-8")
 
 def dub_video(video_path,target_language,requested_voice="auto",preserve_background=True,add_mood_music=True,lip_sync=False):
+    reset_provider_executions()
     work=Path(tempfile.mkdtemp(prefix="dubstudio_"))
     try:
         total=duration(video_path); source_audio=work/"source.wav"; run(["ffmpeg","-y","-i",str(video_path),"-vn","-ar","48000","-ac","2","-c:a","pcm_s16le",str(source_audio)])
@@ -148,7 +146,7 @@ def dub_video(video_path,target_language,requested_voice="auto",preserve_backgro
             output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"; shutil.copy2(prepared,output); lip_result={"applied":False,"provider":provider.name,"landmark_provider":landmark.name,"reason":"Lip-sync requires an available provider, FACE_DETECTOR, and facial-landmark provider; original frames retained."}
         else:
             output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"; shutil.copy2(prepared,output)
-        qc=validate_output(output,total,manifest); final_manifest={"version":"2.6.1","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":bool(background),"background_method":"demucs-two-stems" if background else "none","music":{"enabled":bool(music),"dominant_mood":dominant,"license":"original_procedural" if music else None},"mastering":{"target_lufs":-16,"true_peak_db":-1.5},"lip_sync":lip_result or {"applied":False,"provider":"disabled","reason":"Not requested."},"shot_qc":shot_qc,"quality_control":qc,"segments":manifest}
+        qc=validate_output(output,total,manifest); final_manifest={"version":"2.6.1","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":bool(background),"background_method":"demucs-two-stems" if background else "none","music":{"enabled":bool(music),"dominant_mood":dominant,"license":"original_procedural" if music else None},"mastering":{"target_lufs":-16,"true_peak_db":-1.5},"lip_sync":lip_result or {"applied":False,"provider":"disabled","reason":"Not requested."},"shot_qc":shot_qc,"quality_control":qc,"provider_execution":snapshot(),"segments":manifest}
         json_path=OUTPUT_DIR/f"{output.stem}.json"; json_path.write_text(json.dumps(final_manifest,ensure_ascii=False,indent=2),encoding="utf-8"); write_srt(manifest,OUTPUT_DIR/f"{output.stem}.srt"); return output,dominant,lip_result
     finally: shutil.rmtree(work,ignore_errors=True)
 
