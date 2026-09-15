@@ -6,14 +6,17 @@ compatibility; this surface is intended for the future web application.
 """
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from drama_dubbing import (
     LANGUAGES,
     MAX_UPLOAD_BYTES,
+    OUTPUT_DIR,
     SUPPORTED_EXTENSIONS,
     VOICES,
     dub_video,
@@ -25,14 +28,7 @@ app = FastAPI(title="DubStudio AI Production API", version="1.0.0")
 
 def _run_dub(temp_path: Path, target_language: str, voice: str, preserve_background: bool, add_mood_music: bool, lip_sync: bool) -> dict:
     try:
-        output, dominant, lip = dub_video(
-            temp_path,
-            target_language,
-            voice,
-            preserve_background,
-            add_mood_music,
-            lip_sync,
-        )
+        output, dominant, lip = dub_video(temp_path, target_language, voice, preserve_background, add_mood_music, lip_sync)
         return {
             "filename": output.name,
             "download_url": f"/api/download/{output.name}",
@@ -69,7 +65,7 @@ async def create_job(
         raise HTTPException(400, "Supported formats: MP4, MOV, MKV, WebM, AVI.")
 
     fd, name = tempfile.mkstemp(prefix="dub_upload_", suffix=suffix)
-    Path(name).unlink(missing_ok=True)
+    os.close(fd)
     temp = Path(name)
     total = 0
     try:
@@ -88,15 +84,7 @@ async def create_job(
     finally:
         await video.close()
 
-    job_id = job_manager.submit(
-        _run_dub,
-        temp,
-        target_language,
-        voice,
-        preserve_background,
-        add_mood_music,
-        lip_sync,
-    )
+    job_id = job_manager.submit(_run_dub, temp, target_language, voice, preserve_background, add_mood_music, lip_sync)
     return {"job_id": job_id, "state": "queued", "status_url": f"/api/jobs/{job_id}"}
 
 
@@ -106,3 +94,15 @@ def get_job(job_id: str) -> dict:
     if job is None:
         raise HTTPException(404, "Job not found.")
     return job
+
+
+@app.get("/api/download/{filename}")
+def download(filename: str) -> FileResponse:
+    safe = Path(filename).name
+    if safe != filename or not safe.startswith("dubbed_") or not safe.endswith((".mp4", ".srt", ".json")):
+        raise HTTPException(404, "File not found.")
+    path = (OUTPUT_DIR / safe).resolve()
+    if path.parent != OUTPUT_DIR.resolve() or not path.exists():
+        raise HTTPException(404, "File not found.")
+    media_type = "video/mp4" if path.suffix == ".mp4" else "application/json" if path.suffix == ".json" else "text/plain"
+    return FileResponse(path, media_type=media_type, filename=path.name)
