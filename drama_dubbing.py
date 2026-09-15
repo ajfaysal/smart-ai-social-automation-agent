@@ -10,8 +10,9 @@ import requests
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from music_engine import generate_mood_track, library_info, choose_mood
 
-app = FastAPI(title="DubStudio AI", version="2.1.0")
+app = FastAPI(title="DubStudio AI", version="2.2.0")
 BASE_DIR = Path(__file__).parent
 OUTPUT_DIR = BASE_DIR / "dubbed_output"
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -106,12 +107,6 @@ def build_timeline(items,total,work):
 
 
 def separate_background(source_audio,work):
-    """Return a non-dialogue/background stem when Demucs is available.
-
-    The original dialogue is never mixed back into the final result. If source
-    separation is unavailable, fail closed rather than silently leaving original
-    speech underneath the new dub.
-    """
     demucs = shutil.which("demucs")
     if not demucs:
         raise RuntimeError("Background preservation requires Demucs source separation to be installed on the server.")
@@ -119,16 +114,60 @@ def separate_background(source_audio,work):
     run([demucs,"--two-stems=vocals","-o",str(out_dir),str(source_audio)])
     candidates=list(out_dir.rglob("no_vocals.wav"))
     if not candidates: raise RuntimeError("Source separation completed but no background stem was produced.")
-    bg=candidates[0]
-    fitted=work/"background.wav"
+    bg=candidates[0]; fitted=work/"background.wav"
     run(["ffmpeg","-y","-i",str(bg),"-t",f"{duration(source_audio):.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(fitted)])
     return fitted
 
 
-def mix_background(background,dubbed,total,work):
+def build_mood_music(manifest,total,work):
+    """Build a full-length, scene-aware procedural music bed.
+
+    Each dialogue window receives a mood bed. Silent gaps are filled by the
+    most recently active mood, preventing abrupt starts/stops between lines.
+    The source contains no third-party recordings.
+    """
+    if not manifest: return None, "neutral"
+    moods=[str(x.get("emotion") or "neutral").lower() for x in manifest]
+    dominant=choose_mood(moods)
+    chunks=[]; cursor=0.0; last_mood=dominant
+    for i,x in enumerate(manifest):
+        start=float(x["start"]); end=float(x["end"])
+        if start>cursor+0.02:
+            gap=end-start if False else start-cursor
+            gap_path=work/f"music_gap_{i}.wav"
+            generate_mood_track(last_mood,gap,gap_path); chunks.append((cursor,start,gap_path))
+        mood=str(x.get("emotion") or last_mood).lower()
+        if mood not in moods and mood not in {"neutral","happy","laughing","sad","crying","angry","scared","surprised","romantic","whispering","shouting","apologetic"}: mood=last_mood
+        path=work/f"music_{i}.wav"
+        generate_mood_track(mood,max(0.1,end-start),path); chunks.append((start,end,path)); cursor=end; last_mood=mood
+    if cursor<total-0.02:
+        tail=work/"music_tail.wav"; generate_mood_track(last_mood,total-cursor,tail); chunks.append((cursor,total,tail))
+    concat=work/"music_concat.txt"
+    concat.write_text("\n".join(f"file '{p.as_posix().replace(chr(39),chr(39)+chr(92)+chr(39)+chr(39))}'" for _,_,p in chunks),encoding="utf-8")
+    out=work/"mood_music.wav"
+    run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(concat),"-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(out)])
+    return out, dominant
+
+
+def master_mix(background,dubbed,music,total,work):
     mixed=work/"final_mix.wav"
-    # Keep original non-dialogue ambience/music, but duck it under the new dialogue.
-    run(["ffmpeg","-y","-i",str(background),"-i",str(dubbed),"-filter_complex","[0:a]volume=0.28[bg];[1:a]volume=1.0[voice];[bg][voice]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[a]","-map","[a]","-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(mixed)])
+    inputs=[]; filt=[]
+    if background:
+        inputs += ["-i",str(background)]
+        filt.append("[0:a]volume=0.22,highpass=f=50[bg]")
+    voice_index=1 if background else 0
+    inputs += ["-i",str(dubbed)]
+    filt.append(f"[{voice_index}:a]highpass=f=70,lowpass=f=14000,acompressor=threshold=0.10:ratio=3:attack=15:release=140:makeup=1.2,alimiter=limit=0.92[voice]")
+    next_index=voice_index+1
+    if music:
+        inputs += ["-i",str(music)]
+        filt.append(f"[{next_index}:a]volume=0.065,mcompand=attacks=0.02:decays=0.25:points=-80/-80|-35/-28|-18/-20|-8/-14|0/-10[music]")
+    layers=[]
+    if background: layers.append("[bg]")
+    if music: layers.append("[music]")
+    layers.append("[voice]")
+    filt.append("".join(layers)+f"amix=inputs={len(layers)}:duration=longest:dropout_transition=0:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,alimiter=limit=0.95[a]")
+    run(["ffmpeg","-y",*inputs,"-filter_complex",";".join(filt),"-map","[a]","-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(mixed)])
     return mixed
 
 
@@ -140,15 +179,14 @@ def write_srt(manifest,path):
     path.write_text("\n".join(out),encoding="utf-8")
 
 
-def dub_video(video_path,target_language,requested_voice,preserve_background=True):
+def dub_video(video_path,target_language,requested_voice,preserve_background=True,add_mood_music=True):
     work=Path(tempfile.mkdtemp(prefix="drama-dub-"))
     try:
         total=duration(video_path)
         source=work/"source.mp3"
         run(["ffmpeg","-y","-i",str(video_path),"-vn","-ac","1","-ar","16000",str(source)])
         background=None
-        if preserve_background:
-            background=separate_background(source,work)
+        if preserve_background: background=separate_background(source,work)
         raw=transcribe(source).get("segments",[])
         segments=[]
         for s in raw:
@@ -164,8 +202,7 @@ def dub_video(video_path,target_language,requested_voice,preserve_background=Tru
             if end<=start+0.05: continue
             info=plan.get(i,{"character":f"C{i+1}","profile":"neutral","emotion":"neutral"})
             character=str(info.get("character") or f"C{i+1}"); emotion=str(info.get("emotion") or "neutral")
-            if character not in character_voices:
-                character_voices[character]=requested_voice if requested_voice!="auto" else VOICE_POOL[len(character_voices)%len(VOICE_POOL)]
+            if character not in character_voices: character_voices[character]=requested_voice if requested_voice!="auto" else VOICE_POOL[len(character_voices)%len(VOICE_POOL)]
             voice=character_voices[character]; window=end-start
             translated=translate(text,target_language,window,emotion)
             raw_tts=work/f"tts_{i}.mp3"; fitted=work/f"fit_{i}.wav"
@@ -175,21 +212,29 @@ def dub_video(video_path,target_language,requested_voice,preserve_background=Tru
         concat=build_timeline(items,total,work); dubbed=work/"dubbed.wav"
         run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(concat),"-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(dubbed)])
         if abs(duration(dubbed)-total)>0.05: raise RuntimeError("Final timing verification failed.")
-        final_audio=mix_background(background,dubbed,total,work) if background else dubbed
+        music=None; dominant_mood="neutral"
+        if add_mood_music: music,dominant_mood=build_mood_music(manifest,total,work)
+        final_audio=master_mix(background,dubbed,music,total,work)
         output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"
-        run(["ffmpeg","-y","-i",str(video_path),"-i",str(final_audio),"-map","0:v:0","-map","1:a:0","-c:v","copy","-c:a","aac","-t",f"{total:.3f}","-movflags","+faststart",str(output)])
+        run(["ffmpeg","-y","-i",str(video_path),"-i",str(final_audio),"-map","0:v:0","-map","1:a:0","-c:v","copy","-c:a","aac","-b:a","256k","-t",f"{total:.3f}","-movflags","+faststart",str(output)])
         manifest_path=OUTPUT_DIR/f"{output.stem}.json"
-        manifest_path.write_text(json.dumps({"version":"2.1.0","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":bool(background),"background_method":"demucs-two-stems" if background else "none","video_duration":round(total,3),"target_language":target_language,"characters":character_voices,"segments":manifest},ensure_ascii=False,indent=2),encoding="utf-8")
+        manifest_path.write_text(json.dumps({"version":"2.2.0","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":bool(background),"background_method":"demucs-two-stems" if background else "none","mood_music_enabled":bool(music),"mood_music_mode":"original_procedural" if music else "disabled","mood_music_license":library_info()["license"] if music else None,"attribution_required":False,"dominant_mood":dominant_mood,"audio_mastering":"speech EQ + compression + limiter + -16 LUFS target","video_duration":round(total,3),"target_language":target_language,"characters":character_voices,"segments":manifest},ensure_ascii=False,indent=2),encoding="utf-8")
         write_srt(manifest,OUTPUT_DIR/f"{output.stem}.srt")
-        return output
+        return output,dominant_mood
     finally: shutil.rmtree(work,ignore_errors=True)
 
 
 @app.get("/",response_class=HTMLResponse)
 def home(): return (BASE_DIR/"static"/"index.html").read_text(encoding="utf-8")
 
+@app.get("/api/music-library")
+def music_library(): return library_info()
+
+@app.get("/api/health")
+def health(): return {"status":"ok","version":"2.2.0","demucs_available":bool(shutil.which("demucs")),"music_library":library_info()}
+
 @app.post("/api/dub")
-async def create_dub(video:UploadFile=File(...),target_language:str=Form(...),voice:str=Form("auto"),preserve_background:bool=Form(True)):
+async def create_dub(video:UploadFile=File(...),target_language:str=Form(...),voice:str=Form("auto"),preserve_background:bool=Form(True),add_mood_music:bool=Form(True)):
     if target_language not in LANGUAGES: raise HTTPException(400,"Unsupported target language.")
     if voice!="auto" and voice not in VOICES: raise HTTPException(400,"Unsupported voice.")
     if not video.filename: raise HTTPException(400,"Please upload a video.")
@@ -205,8 +250,8 @@ async def create_dub(video:UploadFile=File(...),target_language:str=Form(...),vo
                 total+=len(chunk)
                 if total>MAX_UPLOAD_BYTES: raise HTTPException(413,"Video exceeds the 500 MB upload limit.")
                 handle.write(chunk)
-        output=dub_video(temp,target_language,voice,preserve_background)
-        return {"filename":output.name,"download_url":f"/api/download/{output.name}","subtitle_url":f"/api/download/{output.stem}.srt","manifest_url":f"/api/download/{output.stem}.json","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":preserve_background}
+        output,dominant_mood=dub_video(temp,target_language,voice,preserve_background,add_mood_music)
+        return {"filename":output.name,"download_url":f"/api/download/{output.name}","subtitle_url":f"/api/download/{output.stem}.srt","manifest_url":f"/api/download/{output.stem}.json","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":preserve_background,"mood_music_enabled":add_mood_music,"dominant_mood":dominant_mood}
     except HTTPException: raise
     except Exception as exc: raise HTTPException(500,f"Dubbing failed: {exc}") from exc
     finally: temp.unlink(missing_ok=True)
