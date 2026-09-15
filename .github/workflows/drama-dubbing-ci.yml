@@ -1,0 +1,22 @@
+name: Drama Dubbing CI
+
+on:
+  push:
+    branches: [main, feature/drama-dubbing-tool]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Syntax check
+        run: python -m py_compile drama_dubbing.py music_engine.py
+      - name: Import check
+        run: |
+          python -m pip install --disable-pip-version-check fastapi uvicorn python-multipart requests numpy
+          python -c "import drama_dubbing, music_engine; print('DubStudio modules import successfully')"
