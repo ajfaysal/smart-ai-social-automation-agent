@@ -1,0 +1,1 @@
+Real-media validation is intentionally manual/opt-in and uses generated fixtures for reproducibility.
