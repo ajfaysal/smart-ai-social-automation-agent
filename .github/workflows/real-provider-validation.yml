@@ -1,0 +1,38 @@
+name: Real Provider Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Provider profile to validate
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - demucs
+          - mediapipe
+          - wav2lip
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependency
+        run: python -m pip install --disable-pip-version-check pytest
+      - name: Run credential-free validation contract tests
+        run: pytest -q test_real_provider_validation.py test_provider_reliability.py
+      - name: Report selected real-provider profile
+        run: |
+          mkdir -p validation-artifacts
+          printf 'selected_provider=%s\n' '${{ inputs.provider }}' > validation-artifacts/profile.txt
+          printf 'real model execution is intentionally opt-in and requires provider-specific setup.\n' >> validation-artifacts/profile.txt
+      - name: Upload validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-provider-validation
+          path: validation-artifacts/
