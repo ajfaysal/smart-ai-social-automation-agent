@@ -5,3 +5,4 @@ uvicorn
 python-multipart
 numpy
 demucs
+opencv-python-headless
