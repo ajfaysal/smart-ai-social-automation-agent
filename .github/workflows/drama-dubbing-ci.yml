@@ -2,7 +2,7 @@ name: Drama Dubbing CI
 
 on:
   push:
-    branches: [main, feature/drama-dubbing-tool]
+    branches: [main, feature/drama-dubbing-tool, feature/e2e-dubbing-integration]
   pull_request:
     branches: [main]
 
@@ -17,7 +17,7 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install --disable-pip-version-check fastapi uvicorn python-multipart requests numpy opencv-python-headless
       - name: Syntax check
-        run: python -m py_compile drama_dubbing.py music_engine.py lip_sync.py lip_sync_provider.py lip_sync_qc.py scene_analysis.py scene_aware_pipeline.py scene_analysis.py lip_sync_router.py face_detector.py face_validation.py face_tracking.py mouth_validation.py landmark_provider.py shot_lipsync.py shot_qc.py
+        run: python -m py_compile drama_dubbing.py music_engine.py lip_sync.py lip_sync_provider.py lip_sync_qc.py scene_analysis.py scene_aware_pipeline.py lip_sync_router.py face_detector.py face_validation.py face_tracking.py mouth_validation.py landmark_provider.py shot_lipsync.py shot_qc.py test_dubbing_integration.py
       - name: Import check
         run: |
           python - <<'PY'
@@ -55,3 +55,5 @@ jobs:
           PY
       - name: Shot QC tests
         run: python test_shot_qc.py
+      - name: End-to-end dubbing integration test
+        run: python -m pytest -q test_dubbing_integration.py
