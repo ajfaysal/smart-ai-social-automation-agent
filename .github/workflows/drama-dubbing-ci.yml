@@ -15,8 +15,21 @@ jobs:
         with:
           python-version: '3.11'
       - name: Syntax check
-        run: python -m py_compile drama_dubbing.py music_engine.py
+        run: python -m py_compile drama_dubbing.py music_engine.py lip_sync.py
       - name: Import check
         run: |
           python -m pip install --disable-pip-version-check fastapi uvicorn python-multipart requests numpy
-          python -c "import drama_dubbing, music_engine; print('DubStudio modules import successfully')"
+          python -c "import drama_dubbing, music_engine, lip_sync; print('DubStudio modules import successfully')"
+      - name: Lip-sync plan smoke test
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from lip_sync import build_lip_sync_plan
+          out = Path('/tmp/lip-sync-plan.json')
+          build_lip_sync_plan([{
+              'index': 1, 'character': 'C1', 'start': 0.0, 'end': 1.0,
+              'translation': 'Hello, how are you?'
+          }], out)
+          assert out.exists() and 'provider-neutral-preparation' in out.read_text()
+          print('Lip-sync preparation smoke test passed')
+          PY
