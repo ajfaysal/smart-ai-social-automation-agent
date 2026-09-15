@@ -1,9 +1,4 @@
-"""Production-facing facial landmark provider boundary.
-
-The default provider is disabled. A backend may be registered through the
-LANDMARK_PROVIDER environment variable without changing the dubbing pipeline.
-This module intentionally does not pretend Haar detections are landmarks.
-"""
+"""Facial-landmark provider boundary used by temporal mouth validation."""
 from __future__ import annotations
 
 import os
@@ -35,8 +30,7 @@ class DisabledLandmarkProvider(LandmarkProvider):
     name = "disabled"
 
     def detect(self, frame) -> LandmarkResult:
-        return LandmarkResult(False, self.name, 0, False, 0.0,
-                              "No facial-landmark provider is configured.")
+        return LandmarkResult(False, self.name, 0, False, 0.0, "No facial-landmark provider is configured.")
 
 
 class MediaPipeLandmarkProvider(LandmarkProvider):
@@ -55,33 +49,30 @@ class MediaPipeLandmarkProvider(LandmarkProvider):
 
     def detect(self, frame) -> LandmarkResult:
         if not self.available():
-            return LandmarkResult(False, self.name, 0, False, 0.0,
-                                  "MediaPipe is not installed.")
-        mp = self._module
+            return LandmarkResult(False, self.name, 0, False, 0.0, "MediaPipe is not installed.")
         try:
             import cv2
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            with mp.solutions.face_mesh.FaceMesh(static_image_mode=True, max_num_faces=2,
-                                                  refine_landmarks=True, min_detection_confidence=0.5) as mesh:
+            with self._module.solutions.face_mesh.FaceMesh(static_image_mode=True, max_num_faces=2,
+                    refine_landmarks=True, min_detection_confidence=0.5) as mesh:
                 result = mesh.process(rgb)
             faces = result.multi_face_landmarks or []
             if not faces:
                 return LandmarkResult(True, self.name, 0, False, 0.0, "No facial landmarks detected.")
             face = faces[0]
             points = [(float(p.x), float(p.y)) for p in face.landmark]
-            mouth_indices = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 78, 308, 191, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308]
+            mouth_indices = [61,146,91,181,84,17,314,405,321,375,291,78,308,191,95,88,178,87,14,317,402,318,324,308]
             mouth = [face.landmark[i] for i in mouth_indices if i < len(face.landmark)]
-            visible = len(mouth) >= 12 and max(p.z for p in mouth) - min(p.z for p in mouth) > -0.25
+            visible = len(mouth) >= 12
             confidence = 0.9 if visible else 0.25
             return LandmarkResult(True, self.name, len(faces), visible, confidence,
-                                  "Facial landmarks and mouth region detected." if visible else "Face landmarks detected but mouth visibility is uncertain.",
-                                  points)
+                "Facial landmarks and mouth region detected." if visible else "Face landmarks detected but mouth visibility is uncertain.", points)
         except Exception as exc:
             return LandmarkResult(True, self.name, 0, False, 0.0, f"Landmark detection error: {exc}")
 
 
 def get_landmark_provider() -> LandmarkProvider:
-    value = os.getenv("LANDMARK_PROVIDER", "disabled").strip().lower()
+    value = os.getenv("MOUTH_LANDMARK_PROVIDER", os.getenv("LANDMARK_PROVIDER", "disabled")).strip().lower()
     if value == "mediapipe":
         return MediaPipeLandmarkProvider()
     return DisabledLandmarkProvider()
