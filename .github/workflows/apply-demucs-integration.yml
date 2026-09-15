@@ -1,0 +1,89 @@
+name: Apply Demucs Integration Patch
+
+on:
+  push:
+    branches: [feature/demucs-provider-audit]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore: wire Demucs') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feature/demucs-provider-audit
+
+      - name: Patch production integration safely
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('drama_dubbing.py')
+          text = path.read_text(encoding='utf-8')
+
+          import_anchor = 'from pathlib import Path\n'
+          import_add = (
+              'from pathlib import Path\n'
+              'from demucs_provider import separate as audited_demucs_separate\n'
+              'from provider_runtime import reset_provider_executions, snapshot\n'
+          )
+          if 'from demucs_provider import separate as audited_demucs_separate' not in text:
+              if text.count(import_anchor) != 1:
+                  raise SystemExit('Expected exactly one pathlib import anchor')
+              text = text.replace(import_anchor, import_add, 1)
+
+          old = '''def separate_background(source_audio,work):
+              demucs=shutil.which("demucs")
+              if not demucs: raise RuntimeError("Background preservation requires Demucs source separation to be installed on the server.")
+              out_dir=work/"separated"; out_dir.mkdir(exist_ok=True)
+              run([demucs,"--two-stems=vocals","-o",str(out_dir),str(source_audio)])
+              candidates=list(out_dir.rglob("no_vocals.wav"))
+              if not candidates: raise RuntimeError("Source separation completed but no background stem was produced.")
+              fitted=work/"background.wav"; run(["ffmpeg","-y","-i",str(candidates[0]),"-t",f"{duration(source_audio):.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(fitted)]); return fitted
+          '''
+          new = '''def separate_background(source_audio,work):
+              separated=audited_demucs_separate(source_audio,work)
+              fitted=work/"background.wav"; run(["ffmpeg","-y","-i",str(separated),"-t",f"{duration(source_audio):.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(fitted)]); return fitted
+          '''
+          if old in text:
+              text = text.replace(old, new, 1)
+          else:
+              pattern = r'def separate_background\(source_audio,work\):\n.*?return fitted\n'
+              match = re.search(pattern, text, flags=re.S)
+              if not match:
+                  raise SystemExit('Could not locate separate_background safely')
+              replacement = 'def separate_background(source_audio,work):\n    separated=audited_demucs_separate(source_audio,work)\n    fitted=work/"background.wav"; run(["ffmpeg","-y","-i",str(separated),"-t",f"{duration(source_audio):.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(fitted)]); return fitted\n'
+              text = text[:match.start()] + replacement + text[match.end():]
+
+          dub_anchor = 'def dub_video(video_path,target_language,requested_voice="auto",preserve_background=True,add_mood_music=True,lip_sync=False):\n'
+          if dub_anchor not in text:
+              raise SystemExit('Could not locate dub_video safely')
+          if dub_anchor + '    reset_provider_executions()\n' not in text:
+              text = text.replace(dub_anchor, dub_anchor + '    reset_provider_executions()\n', 1)
+
+          manifest_old = '"shot_qc":shot_qc,"quality_control":qc,"segments":manifest}'
+          manifest_new = '"shot_qc":shot_qc,"quality_control":qc,"provider_execution":snapshot(),"segments":manifest}'
+          if manifest_old in text and '"provider_execution":snapshot()' not in text:
+              text = text.replace(manifest_old, manifest_new, 1)
+          elif '"provider_execution":snapshot()' not in text:
+              raise SystemExit('Could not locate final manifest safely')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Validate syntax
+        run: python -m py_compile drama_dubbing.py demucs_provider.py provider_runtime.py
+
+      - name: Commit production integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add drama_dubbing.py .github/workflows/apply-demucs-integration.yml
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: wire Demucs provider into production manifest"
+          git push origin HEAD:feature/demucs-provider-audit
