@@ -1,9 +1,4 @@
-"""Conservative per-shot face and mouth tracking eligibility.
-
-This layer does not animate faces. It samples frames inside each shot and only
-marks a shot eligible when the primary face remains stable and the mouth region
-is detected on a sufficient fraction of samples.
-"""
+"""Conservative per-shot face and mouth tracking eligibility."""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -21,6 +16,7 @@ class TrackSample:
     confidence: float
     box: tuple[int, int, int, int] | None
     mouth_box: tuple[int, int, int, int] | None
+    mouth_provider: str
 
 
 def _center(box):
@@ -29,8 +25,7 @@ def _center(box):
 
 
 def _distance(a, b):
-    ax, ay = _center(a)
-    bx, by = _center(b)
+    ax, ay = _center(a); bx, by = _center(b)
     return math.hypot(ax - bx, ay - by)
 
 
@@ -50,7 +45,9 @@ def track_shot(video: Path, start: float, end: float, samples: int = 5) -> dict:
     times = [start + (end - start) * i / (count - 1) for i in range(count)]
     records = []
     previous = None
-    mouth_configured = __import__("os").getenv("MOUTH_LANDMARK_PROVIDER", "disabled").strip().lower() in {"opencv-haar-mouth", "opencv"}
+    import os
+    mouth_provider = os.getenv("MOUTH_LANDMARK_PROVIDER", "disabled").strip().lower()
+    mouth_configured = mouth_provider in {"mediapipe", "opencv-haar-mouth", "opencv"}
     for t in times:
         cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, t) * 1000.0)
         ok, frame = cap.read()
@@ -62,9 +59,11 @@ def track_shot(video: Path, start: float, end: float, samples: int = 5) -> dict:
             box = None
         m = validate_mouth(frame) if box is not None else None
         mouth_visible = bool(m and m.mouth_visible and box is not None)
-        records.append(asdict(TrackSample(round(t, 3), d.face_count, d.suitable and box is not None,
-                                          mouth_visible, m.confidence if m else 0.0, box,
-                                          m.mouth_box if m and mouth_visible else None)))
+        records.append(asdict(TrackSample(
+            round(t, 3), d.face_count, d.suitable and box is not None, mouth_visible,
+            m.confidence if m else 0.0, box,
+            m.mouth_box if m and mouth_visible else None,
+            m.provider if m else mouth_provider)))
         if box is not None:
             previous = box
     cap.release()
@@ -72,17 +71,17 @@ def track_shot(video: Path, start: float, end: float, samples: int = 5) -> dict:
     mouth_ratio = sum(r["mouth_visible"] for r in records) / len(records) if records else 0.0
     eligible = mouth_configured and len(records) >= 2 and face_ratio >= 0.6 and mouth_ratio >= 0.6
     if not mouth_configured:
-        reason = "Mouth landmark provider is not configured; shot remains fallback-only."
         status = "mouth_validation_not_configured"
+        reason = "Mouth landmark provider is not configured; shot remains fallback-only."
     elif eligible:
-        reason = "Stable face and visible mouth across the shot."
         status = "eligible"
+        reason = "Stable face and visible mouth across the shot."
     else:
-        reason = "Face tracking or mouth visibility was insufficient."
         status = "rejected"
+        reason = "Face tracking or mouth visibility was insufficient."
     return {"status": status, "eligible": eligible, "samples": records,
             "face_ratio": round(face_ratio, 3), "mouth_ratio": round(mouth_ratio, 3),
-            "reason": reason}
+            "mouth_provider": mouth_provider, "reason": reason}
 
 
 def build_face_tracks(video: Path, shots: list[dict], output: Path) -> Path:
@@ -91,8 +90,8 @@ def build_face_tracks(video: Path, shots: list[dict], output: Path) -> Path:
         start = float(shot.get("start", 0)); end = float(shot.get("end", start))
         records.append({"shot": shot.get("index"), "start": start, "end": end,
                         **track_shot(video, start, end)})
-    payload = {"version": "1.1", "video": video.name,
-               "method": "opencv-haar-face-plus-mouth-sampled-track",
+    payload = {"version": "1.2", "video": video.name,
+               "method": "sampled-face-track-plus-configured-mouth-provider",
                "eligible_shots": sum(1 for r in records if r["eligible"]),
                "total_shots": len(records), "records": records}
     output.write_text(json.dumps(payload, indent=2), encoding="utf-8")
