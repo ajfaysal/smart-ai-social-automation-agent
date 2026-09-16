@@ -129,10 +129,14 @@ def dub_video(video_path,target_language,requested_voice="auto",preserve_backgro
         for i,(start,end,text) in enumerate(segments):
             start=max(start,previous)
             if end<=start+.05: continue
-            info=plan.get(i,{"character":f"C{i+1}","profile":"neutral","emotion":"neutral"}); char=str(info.get("character") or f"C{i+1}"); emotion=str(info.get("emotion") or "neutral")
-            if char not in voices: voices[char]=requested_voice if requested_voice!="auto" else VOICE_POOL[len(voices)%len(VOICE_POOL)]
+            info=plan.get(i,{"character":f"C{i+1}","profile":"neutral","emotion":"neutral"}); char=str(info.get("character") or f"C{i+1}"); emotion=str(info.get("emotion") or "neutral"); profile=str(info.get("profile") or "")
+            if char not in voices:
+                # The director's profile is authoritative when the selected
+                # provider supports it (Bangla profiles are handled by the
+                # Kaggle runner). Otherwise retain the generic voice pool.
+                voices[char] = profile if profile in VOICE_POOL else (requested_voice if requested_voice!="auto" else VOICE_POOL[len(voices)%len(VOICE_POOL)])
             window=end-start; translated=translate(text,target_language,window,emotion); raw=work/f"tts_{i}.mp3"; fitted=work/f"fit_{i}.wav"; make_tts(translated,raw,voices[char],emotion); fit_audio_exact(raw,fitted,window); items.append((start,end,fitted)); previous=end
-            manifest.append({"index":i+1,"character":char,"profile":info.get("profile","neutral"),"voice":voices[char],"emotion":emotion,"start":round(start,3),"end":round(end,3),"duration":round(window,3),"source":text,"translation":translated,"timing_lock":True,"drift_ms":0})
+            manifest.append({"index":i+1,"character":char,"profile":profile or "neutral","voice":voices[char],"emotion":emotion,"start":round(start,3),"end":round(end,3),"duration":round(window,3),"source":text,"translation":translated,"timing_lock":True,"drift_ms":0})
         concat=build_timeline(items,total,work); dubbed=work/"dubbed.wav"; run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(concat),"-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(dubbed)])
         if abs(duration(dubbed)-total)>.05: raise RuntimeError("Final timing verification failed.")
         music,dominant=(build_mood_music(manifest,total,work) if add_mood_music else (None,"neutral")); final_audio=master_mix(background,dubbed,music,total,work)
@@ -148,41 +152,5 @@ def dub_video(video_path,target_language,requested_voice="auto",preserve_backgro
             output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"; shutil.copy2(prepared,output)
         qc=validate_output(output,total,manifest); final_manifest={"version":"2.6.1","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":bool(background),"background_method":"demucs-two-stems" if background else "none","music":{"enabled":bool(music),"dominant_mood":dominant,"license":"original_procedural" if music else None},"mastering":{"target_lufs":-16,"true_peak_db":-1.5},"lip_sync":lip_result or {"applied":False,"provider":"disabled","reason":"Not requested."},"shot_qc":shot_qc,"quality_control":qc,"provider_execution":snapshot(),"segments":manifest}
         json_path=OUTPUT_DIR/f"{output.stem}.json"; json_path.write_text(json.dumps(final_manifest,ensure_ascii=False,indent=2),encoding="utf-8"); write_srt(manifest,OUTPUT_DIR/f"{output.stem}.srt"); return output,dominant,lip_result
-    finally: shutil.rmtree(work,ignore_errors=True)
-
-@app.get("/",response_class=HTMLResponse)
-def home(): return (BASE_DIR/"static"/"index.html").read_text(encoding="utf-8")
-@app.get("/api/music-library")
-def music_library(): return library_info()
-@app.get("/api/health")
-def health():
-    p=get_lip_sync_provider(); l=get_landmark_provider(); return {"status":"ok","version":"2.6.1","demucs_available":bool(shutil.which("demucs")),"lipsync_provider":p.name,"lipsync_available":p.available(),"face_detector":os.getenv("FACE_DETECTOR","disabled"),"landmark_provider":l.name,"landmark_available":l.available(),"music_library":library_info()}
-@app.post("/api/dub")
-async def create_dub(video:UploadFile=File(...),target_language:str=Form(...),voice:str=Form("auto"),preserve_background:bool=Form(True),add_mood_music:bool=Form(True),lip_sync:bool=Form(False)):
-    if target_language not in LANGUAGES: raise HTTPException(400,"Unsupported target language.")
-    if voice!="auto" and voice not in VOICES: raise HTTPException(400,"Unsupported voice.")
-    if not video.filename: raise HTTPException(400,"Please upload a video.")
-    suffix=Path(video.filename).suffix.lower()
-    if suffix not in SUPPORTED_EXTENSIONS: raise HTTPException(400,"Supported formats: MP4, MOV, MKV, WebM, AVI.")
-    temp=Path(tempfile.mkstemp(suffix=suffix)[1])
-    try:
-        total=0
-        with temp.open("wb") as f:
-            while True:
-                chunk=await video.read(1024*1024)
-                if not chunk: break
-                total+=len(chunk)
-                if total>MAX_UPLOAD_BYTES: raise HTTPException(413,"Video exceeds the 500 MB upload limit.")
-                f.write(chunk)
-        output,dominant,lip=dub_video(temp,target_language,voice,preserve_background,add_mood_music,lip_sync)
-        return {"filename":output.name,"download_url":f"/api/download/{output.name}","subtitle_url":f"/api/download/{output.stem}.srt","manifest_url":f"/api/download/{output.stem}.json","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":preserve_background,"mood_music_enabled":add_mood_music,"dominant_mood":dominant,"lip_sync_requested":lip_sync,"lip_sync_applied":bool(lip and lip.get("applied")),"lip_sync_provider":lip.get("provider","disabled") if lip else "disabled","lip_sync_landmark_provider":lip.get("landmark_provider","disabled") if lip else "disabled","lip_sync_reason":lip.get("reason") if lip else "Not requested.","shot_manifest":lip.get("shot_manifest") if lip else None}
-    except HTTPException: raise
-    except Exception as exc: raise HTTPException(500,f"Dubbing failed: {exc}") from exc
-    finally: temp.unlink(missing_ok=True)
-@app.get("/api/download/{filename}")
-def download(filename:str):
-    safe=Path(filename).name
-    if safe!=filename or not safe.startswith(("dubbed_","prepared_")) or not safe.endswith((".mp4",".srt",".json")): raise HTTPException(404,"File not found.")
-    path=(OUTPUT_DIR/safe).resolve()
-    if path.parent!=OUTPUT_DIR.resolve() or not path.exists(): raise HTTPException(404,"File not found.")
-    return FileResponse(path,media_type="video/mp4" if path.suffix==".mp4" else "text/plain",filename=path.name)
+    finally:
+        shutil.rmtree(work,ignore_errors=True)
