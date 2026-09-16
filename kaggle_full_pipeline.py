@@ -90,32 +90,20 @@ def natural_bangla_tts(text, out_path, voice, emotion):
 
 
 def quality_master_mix(background, dubbed, music, total, work):
-    """Speech-first mix with real sidechain ducking."""
+    """Speech-first mix with no original dialogue/music bed for V1."""
     out = Path(work) / "master.wav"
     inputs = ["-i", str(dubbed)]
     filters = ["[0:a]highpass=f=75,lowpass=f=15000,acompressor=threshold=0.25:ratio=2:attack=20:release=180:makeup=1.0,alimiter=limit=0.94[voice]"]
-    idx = 1
-    bed_layers = []
-    if background:
-        inputs += ["-i", str(background)]
-        filters.append(f"[{idx}:a]highpass=f=45,lowpass=f=16000,volume=0.80[bg]")
-        bed_layers.append("[bg]")
-        idx += 1
-    if music:
-        inputs += ["-i", str(music)]
-        filters.append(f"[{idx}:a]volume=0.035[music]")
-        bed_layers.append("[music]")
-    if bed_layers:
-        filters.append("".join(bed_layers) + f"amix=inputs={len(bed_layers)}:duration=longest:dropout_transition=0:normalize=0[bed]")
-        filters.append("[bed][voice]sidechaincompress=threshold=0.025:ratio=8:attack=18:release=320:makeup=1[ducked]")
-        filters.append("[ducked][voice]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=8,alimiter=limit=0.95[a]")
-    else:
-        filters.append("[voice]loudnorm=I=-16:TP=-1.5:LRA=8,alimiter=limit=0.95[a]")
+    # V1 deliberately omits both the Demucs background bed and generated mood
+    # music: the final drama keeps the original picture while replacing audio
+    # dialogue and removing the original music track.
+    filters.append("[voice]loudnorm=I=-16:TP=-1.5:LRA=8,alimiter=limit=0.95[a]")
     subprocess.run(["ffmpeg", "-y", *inputs, "-filter_complex", ";".join(filters), "-map", "[a]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", "-t", f"{total:.3f}", str(out)], check=True)
     return out
 
 if {language!r} == "Bangla":
-    # dub_video assigns one stable pool entry per detected character.
+    # V1 audio contract: remove original Chinese dialogue and original BGM.
+    # No original background bed is mixed back into the final output.
     drama_dubbing.VOICE_POOL = BANGLA_CHARACTER_VOICE_POOL
     drama_dubbing.make_tts = natural_bangla_tts
     drama_dubbing.master_mix = quality_master_mix
@@ -124,8 +112,8 @@ output, mood, lip = drama_dubbing.dub_video(
     INPUT,
     {language!r},
     requested_voice="auto",
-    preserve_background=True,
-    add_mood_music=True,
+    preserve_background=False,
+    add_mood_music=False,
     lip_sync=True,
 )
 
@@ -144,7 +132,9 @@ report = {{
     "lip_sync": lip,
     "voice_engine": "edge-neural-bangla-multicharacter" if {language!r} == "Bangla" else "canonical-openai",
     "character_voice_profiles": BANGLA_CHARACTER_VOICE_POOL if {language!r} == "Bangla" else [],
-    "audio_mix": "sidechain-ducked-speech-first",
+    "audio_mix": "replacement-dialogue-only-no-original-music",
+    "original_dialogue_removed": True,
+    "original_music_removed": True,
 }}
 (ARTIFACTS / "cloud-provider-certification.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 print(json.dumps(report, ensure_ascii=False, indent=2))
