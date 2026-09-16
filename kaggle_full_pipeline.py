@@ -45,6 +45,8 @@ os.environ["MOUTH_LANDMARK_PROVIDER"] = "mediapipe"
 
 subprocess.run(["git", "clone", "--depth", "1", "--branch", {ref!r}, "https://github.com/{repo}.git", str(REPO)], check=True)
 subprocess.run(["pip", "install", "-r", "requirements.txt", "-r", "requirements-cloud-runner.txt"], cwd=REPO, check=True)
+if {language!r} == "Bangla":
+    subprocess.run(["pip", "install", "-q", "edge-tts>=7.0,<8"], check=True)
 subprocess.run(["python", "run_cloud_smoke.py", {video_url!r}, "--output", str(INPUT), "--report", str(REPO / "validation-artifacts" / "cloud-input.json")], cwd=REPO, check=True)
 
 wav_repo = Path("/kaggle/working/Wav2Lip")
