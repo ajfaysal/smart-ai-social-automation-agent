@@ -28,7 +28,7 @@ def main() -> int:
     parser.add_argument("--video-url", required=True)
     parser.add_argument("--repo", default="ajfaysal/smart-ai-social-automation-agent")
     parser.add_argument("--ref", default="main")
-    parser.add_argument("--language", default="Chinese (Simplified)")
+    parser.add_argument("--language", default="Bangla", choices=["Bangla", "English", "Hindi"])
     parser.add_argument("--kernel-slug", default="drama-dubbing-full-pipeline")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
