@@ -21,3 +21,21 @@ def test_full_notebook_is_secret_free_and_uses_canonical_pipeline():
     assert "lip_sync=True" in source
     assert "KAGGLE_API_TOKEN" not in source
     json.dumps(notebook)
+
+
+def test_bangla_notebook_uses_neural_voice_and_speech_first_mix():
+    notebook = build_notebook(
+        "https://drive.google.com/file/d/FILE_ID/view?usp=sharing",
+        "ajfaysal/smart-ai-social-automation-agent",
+        "main",
+        "Bangla",
+    )
+    source = "".join(notebook["cells"][0]["source"])
+    assert "edge-tts" in source
+    assert "synthesize_bangla" in source
+    assert "natural_bangla_tts" in source
+    assert "sidechaincompress" in source
+    assert "edge-neural-bangla" in source
+    assert "lip_sync=True" in source
+    assert "KAGGLE_API_TOKEN" not in source
+    json.dumps(notebook)
