@@ -20,7 +20,6 @@ INPUT = REPO / "validation-input" / "source.mp4"
 ARTIFACTS = Path("/kaggle/working/final-artifacts")
 ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
-# Runtime-only secrets. Nothing below writes credentials into Git.
 try:
     from kaggle_secrets import UserSecretsClient
     secrets = UserSecretsClient()
@@ -46,12 +45,8 @@ os.environ["MOUTH_LANDMARK_PROVIDER"] = "mediapipe"
 
 subprocess.run(["git", "clone", "--depth", "1", "--branch", {ref!r}, "https://github.com/{repo}.git", str(REPO)], check=True)
 subprocess.run(["pip", "install", "-r", "requirements.txt", "-r", "requirements-cloud-runner.txt"], cwd=REPO, check=True)
-
-# Fetch the public Drive fixture and validate video+audio+duration first.
 subprocess.run(["python", "run_cloud_smoke.py", {video_url!r}, "--output", str(INPUT), "--report", str(REPO / "validation-artifacts" / "cloud-input.json")], cwd=REPO, check=True)
 
-# Install Wav2Lip only inside the ephemeral Kaggle runtime. The checkpoint and
-# S3FD detector are supplied through Kaggle Secrets as URLs, never committed.
 wav_repo = Path("/kaggle/working/Wav2Lip")
 subprocess.run(["git", "clone", "--depth", "1", "https://github.com/Rudrabha/Wav2Lip.git", str(wav_repo)], check=True)
 subprocess.run(["pip", "install", "-r", "requirements.txt"], cwd=wav_repo, check=True)
@@ -67,46 +62,34 @@ wrapper.chmod(0o755)
 os.environ["WAV2LIP_COMMAND"] = str(wrapper)
 os.environ["WAV2LIP_MODEL_PATH"] = str(wav_repo / "checkpoints" / "wav2lip.pth")
 
-# For Bangla, prefer Microsoft Edge Neural TTS over the robotic offline Piper
-# fallback. The provider is runtime-only and is still audited by the final manifest.
+# Bangla uses Microsoft Edge Neural TTS instead of the robotic Piper fallback.
 import drama_dubbing
 from tts_provider import synthesize_bangla
 
-_original_make_tts = drama_dubbing.make_tts
-
 def natural_bangla_tts(text, out_path, voice, emotion):
-    profile = "female" if voice in {"nova", "shimmer", "fable"} else "male"
-    provider = synthesize_bangla(text, Path(out_path), profile=profile)
-    # Convert to a stable lossless intermediate for the timing engine.
-    pcm = Path(out_path).with_suffix(".wav")
-    subprocess.run(["ffmpeg", "-y", "-i", str(out_path), "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", str(pcm)], check=True)
-    Path(out_path).write_bytes(Path(pcm).read_bytes())
-    Path(out_path).with_suffix(".provider").write_text(provider, encoding="utf-8")
+    profile = "female" if voice in {{"nova", "shimmer", "fable"}} else "male"
+    synthesize_bangla(text, Path(out_path), profile=profile)
 
 def quality_master_mix(background, dubbed, music, total, work):
     """Speech-first mix with real sidechain ducking instead of static bed volume."""
     out = Path(work) / "master.wav"
     inputs = ["-i", str(dubbed)]
     filters = ["[0:a]highpass=f=75,lowpass=f=15000,acompressor=threshold=0.25:ratio=2:attack=20:release=180:makeup=1.0,alimiter=limit=0.94[voice]"]
-    layers = ["[voice]"]
     idx = 1
+    bed_layers = []
     if background:
         inputs += ["-i", str(background)]
         filters.append(f"[{idx}:a]highpass=f=45,lowpass=f=16000,volume=0.80[bg]")
+        bed_layers.append("[bg]")
         idx += 1
-        layers.append("[bg]")
     if music:
         inputs += ["-i", str(music)]
         filters.append(f"[{idx}:a]volume=0.035[music]")
-        layers.append("[music]")
-    # Mix the non-speech bed, then duck it against the speech signal.
-    bed = "[bed]"
-    bed_layers = layers[1:]
+        bed_layers.append("[music]")
     if bed_layers:
-        filters.append("".join(bed_layers) + f"amix=inputs={len(bed_layers)}:duration=longest:dropout_transition=0:normalize=0{bed}")
-        filters.append(f"{bed}[voice]sidechaincompress=threshold=0.025:ratio=8:attack=18:release=320:makeup=1[ducked]")
-        mix = "[ducked][voice]"
-        filters.append(f"{mix}amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=8,alimiter=limit=0.95[a]")
+        filters.append("".join(bed_layers) + f"amix=inputs={len(bed_layers)}:duration=longest:dropout_transition=0:normalize=0[bed]")
+        filters.append("[bed][voice]sidechaincompress=threshold=0.025:ratio=8:attack=18:release=320:makeup=1[ducked]")
+        filters.append("[ducked][voice]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=8,alimiter=limit=0.95[a]")
     else:
         filters.append("[voice]loudnorm=I=-16:TP=-1.5:LRA=8,alimiter=limit=0.95[a]")
     subprocess.run(["ffmpeg", "-y", *inputs, "-filter_complex", ";".join(filters), "-map", "[a]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", "-t", f"{total:.3f}", str(out)], check=True)
@@ -116,9 +99,6 @@ if {language!r} == "Bangla":
     drama_dubbing.make_tts = natural_bangla_tts
     drama_dubbing.master_mix = quality_master_mix
 
-# Execute canonical production pipeline: STT -> director -> translation ->
-# neural Bangla TTS -> exact timing -> Demucs -> speech-first ducking/mastering
-# -> shot-aware Wav2Lip -> final QC + manifest.
 output, mood, lip = drama_dubbing.dub_video(
     INPUT,
     {language!r},
