@@ -85,6 +85,34 @@ BANGLA_CHARACTER_VOICE_POOL = [
 ]
 
 
+def _profile_from_hint(hint, character_index):
+    """Normalize director hints to one of the real Bangla profile IDs."""
+    hint = str(hint or "").strip().lower()
+    exact = {p.lower(): p for p in BANGLA_CHARACTER_VOICE_POOL}
+    if hint in exact:
+        return exact[hint]
+    female = any(x in hint for x in ("female", "woman", "girl", "mother", "sister"))
+    male = any(x in hint for x in ("male", "man", "boy", "father", "brother"))
+    if female:
+        return BANGLA_CHARACTER_VOICE_POOL[(character_index * 2) % 10]
+    if male:
+        return BANGLA_CHARACTER_VOICE_POOL[((character_index * 2) + 1) % 10]
+    return BANGLA_CHARACTER_VOICE_POOL[character_index % 10]
+
+_original_director_plan = drama_dubbing.director_plan
+
+
+def bangla_director_plan(segments):
+    plan = _original_director_plan(segments)
+    character_slots = {}
+    for i, info in plan.items():
+        char = str(info.get("character") or f"C{{i+1}}")
+        if char not in character_slots:
+            character_slots[char] = len(character_slots)
+        info["profile"] = _profile_from_hint(info.get("profile"), character_slots[char])
+    return plan
+
+
 def natural_bangla_tts(text, out_path, voice, emotion):
     synthesize_bangla(text, Path(out_path), profile=voice)
 
@@ -105,6 +133,7 @@ if {language!r} == "Bangla":
     # V1 audio contract: remove original Chinese dialogue and original BGM.
     # No original background bed is mixed back into the final output.
     drama_dubbing.VOICE_POOL = BANGLA_CHARACTER_VOICE_POOL
+    drama_dubbing.director_plan = bangla_director_plan
     drama_dubbing.make_tts = natural_bangla_tts
     drama_dubbing.master_mix = quality_master_mix
 
