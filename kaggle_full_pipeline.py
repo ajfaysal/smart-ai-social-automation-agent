@@ -1,9 +1,4 @@
-"""Build a Kaggle GPU notebook for the real end-to-end dubbing smoke run.
-
-Secrets and model weights are runtime-only. The generated notebook reads Kaggle
-Secrets for OpenAI and Wav2Lip assets, then executes the repository's canonical
-`dub_video` pipeline against the public cloud input.
-"""
+"""Build a Kaggle GPU notebook for the real end-to-end dubbing smoke run."""
 from __future__ import annotations
 
 import argparse
@@ -59,21 +54,43 @@ subprocess.run(["wget", "-q", "-O", str(wav_repo / "checkpoints" / "wav2lip.pth"
 subprocess.run(["wget", "-q", "-O", str(wav_repo / "face_detection" / "detection" / "sfd" / "s3fd.pth"), s3fd_url], check=True)
 
 wrapper = Path("/kaggle/working/wav2lip")
-wrapper.write_text("""#!/bin/sh\nset -eu\nVIDEO=\"\"; AUDIO=\"\"; CKPT=\"\"; OUT=\"\"\nwhile [ $# -gt 0 ]; do\n  case \"$1\" in\n    --video) VIDEO=\"$2\"; shift 2;;\n    --audio) AUDIO=\"$2\"; shift 2;;\n    --checkpoint) CKPT=\"$2\"; shift 2;;\n    --outfile) OUT=\"$2\"; shift 2;;\n    *) echo \"unknown arg: $1\" >&2; exit 2;;\n  esac\ndone\nexec python /kaggle/working/Wav2Lip/inference.py --checkpoint_path \"$CKPT\" --face \"$VIDEO\" --audio \"$AUDIO\" --outfile \"$OUT\"\n""", encoding="utf-8")
+wrapper.write_text("""#!/bin/sh
+set -eu
+VIDEO=""; AUDIO=""; CKPT=""; OUT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --video) VIDEO="$2"; shift 2;;
+    --audio) AUDIO="$2"; shift 2;;
+    --checkpoint) CKPT="$2"; shift 2;;
+    --outfile) OUT="$2"; shift 2;;
+    *) echo "unknown arg: $1" >&2; exit 2;;
+  esac
+done
+exec python /kaggle/working/Wav2Lip/inference.py --checkpoint_path "$CKPT" --face "$VIDEO" --audio "$AUDIO" --outfile "$OUT"
+""", encoding="utf-8")
 wrapper.chmod(0o755)
 os.environ["WAV2LIP_COMMAND"] = str(wrapper)
 os.environ["WAV2LIP_MODEL_PATH"] = str(wav_repo / "checkpoints" / "wav2lip.pth")
 
-# Bangla uses Microsoft Edge Neural TTS instead of the robotic Piper fallback.
 import drama_dubbing
 from tts_provider import synthesize_bangla
 
+# A Bangla drama needs stable character identities, not one generic male/female
+# voice. These ten profile IDs map to the native Bengali neural inventory plus
+# conservative rate/pitch variants inside tts_provider.py.
+BANGLA_CHARACTER_VOICE_POOL = [
+    "bn_c01_f_young", "bn_c02_m_young", "bn_c03_f_adult", "bn_c04_m_adult",
+    "bn_c05_f_mature", "bn_c06_m_mature", "bn_c07_f_soft", "bn_c08_m_deep",
+    "bn_c09_f_energetic", "bn_c10_m_energetic",
+]
+
+
 def natural_bangla_tts(text, out_path, voice, emotion):
-    profile = "female" if voice in {{"nova", "shimmer", "fable"}} else "male"
-    synthesize_bangla(text, Path(out_path), profile=profile)
+    synthesize_bangla(text, Path(out_path), profile=voice)
+
 
 def quality_master_mix(background, dubbed, music, total, work):
-    """Speech-first mix with real sidechain ducking instead of static bed volume."""
+    """Speech-first mix with real sidechain ducking."""
     out = Path(work) / "master.wav"
     inputs = ["-i", str(dubbed)]
     filters = ["[0:a]highpass=f=75,lowpass=f=15000,acompressor=threshold=0.25:ratio=2:attack=20:release=180:makeup=1.0,alimiter=limit=0.94[voice]"]
@@ -98,6 +115,8 @@ def quality_master_mix(background, dubbed, music, total, work):
     return out
 
 if {language!r} == "Bangla":
+    # dub_video assigns one stable pool entry per detected character.
+    drama_dubbing.VOICE_POOL = BANGLA_CHARACTER_VOICE_POOL
     drama_dubbing.make_tts = natural_bangla_tts
     drama_dubbing.master_mix = quality_master_mix
 
@@ -123,7 +142,8 @@ report = {{
     "subtitle": str(ARTIFACTS / subtitle.name),
     "mood": mood,
     "lip_sync": lip,
-    "voice_engine": "edge-neural-bangla" if {language!r} == "Bangla" else "canonical-openai",
+    "voice_engine": "edge-neural-bangla-multicharacter" if {language!r} == "Bangla" else "canonical-openai",
+    "character_voice_profiles": BANGLA_CHARACTER_VOICE_POOL if {language!r} == "Bangla" else [],
     "audio_mix": "sidechain-ducked-speech-first",
 }}
 (ARTIFACTS / "cloud-provider-certification.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
