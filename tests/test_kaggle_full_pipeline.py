@@ -51,7 +51,7 @@ def test_v1_audio_policy_requires_dialogue_and_music_replacement():
     assert describe_policy() == {
         "remove_original_dialogue": True,
         "remove_original_music": True,
-        "preserve_original_sfx": True,
+        "preserve_original_sfx": False,
     }
     validate_policy(V1_AUDIO_POLICY)
 
