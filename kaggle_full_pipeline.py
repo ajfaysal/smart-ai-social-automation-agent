@@ -32,28 +32,156 @@ except Exception:
         if required and not value:
             raise RuntimeError(f"Missing runtime secret: {{name}}")
         return value
+
+os.environ["OPENAI_API_KEY"] = secret("OPENAI_API_KEY", required=True)
+os.environ["LIPSYNC_PROVIDER"] = "wav2lip"
+os.environ["FACE_DETECTOR"] = "opencv-haar"
+os.environ["MOUTH_LANDMARK_PROVIDER"] = "mediapipe"
+
+subprocess.run(["git", "clone", "--depth", "1", "--branch", {ref!r}, "https://github.com/{repo}.git", str(REPO)], check=True)
+subprocess.run(["pip", "install", "-r", "requirements.txt", "-r", "requirements-cloud-runner.txt"], cwd=REPO, check=True)
+if {language!r} == "Bangla":
+    subprocess.run(["pip", "install", "-q", "edge-tts>=7.0,<8"], check=True)
+subprocess.run(["python", "run_cloud_smoke.py", {video_url!r}, "--output", str(INPUT), "--report", str(REPO / "validation-artifacts" / "cloud-input.json")], cwd=REPO, check=True)
+
+wav_repo = Path("/kaggle/working/Wav2Lip")
+subprocess.run(["git", "clone", "--depth", "1", "https://github.com/Rudrabha/Wav2Lip.git", str(wav_repo)], check=True)
+subprocess.run(["pip", "install", "-r", "requirements.txt"], cwd=wav_repo, check=True)
+ckpt_url = secret("WAV2LIP_CHECKPOINT_URL", required=True)
+s3fd_url = secret("WAV2LIP_S3FD_URL", required=True)
+subprocess.run(["mkdir", "-p", str(wav_repo / "checkpoints"), str(wav_repo / "face_detection" / "detection" / "sfd")], check=True)
+subprocess.run(["wget", "-q", "-O", str(wav_repo / "checkpoints" / "wav2lip.pth"), ckpt_url], check=True)
+subprocess.run(["wget", "-q", "-O", str(wav_repo / "face_detection" / "detection" / "sfd" / "s3fd.pth"), s3fd_url], check=True)
+
+wrapper = Path("/kaggle/working/wav2lip")
+wrapper.write_text("""#!/bin/sh
+set -eu
+VIDEO=""; AUDIO=""; CKPT=""; OUT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --video) VIDEO="$2"; shift 2;;
+    --audio) AUDIO="$2"; shift 2;;
+    --checkpoint) CKPT="$2"; shift 2;;
+    --outfile) OUT="$2"; shift 2;;
+    *) echo "unknown arg: $1" >&2; exit 2;;
+  esac
+done
+exec python /kaggle/working/Wav2Lip/inference.py --checkpoint_path "$CKPT" --face "$VIDEO" --audio "$AUDIO" --outfile "$OUT"
+""", encoding="utf-8")
+wrapper.chmod(0o755)
+os.environ["WAV2LIP_COMMAND"] = str(wrapper)
+os.environ["WAV2LIP_MODEL_PATH"] = str(wav_repo / "checkpoints" / "wav2lip.pth")
+
+import drama_dubbing
+from tts_provider import synthesize_bangla
+
+# Stable Bangla character profile IDs. Each ID maps to a native Bengali neural
+# voice plus a conservative rate/pitch delivery variant.
+BANGLA_CHARACTER_VOICE_POOL = [
+    "bn_c01_f_young", "bn_c02_m_young", "bn_c03_f_adult", "bn_c04_m_adult",
+    "bn_c05_f_mature", "bn_c06_m_mature", "bn_c07_f_soft", "bn_c08_m_deep",
+    "bn_c09_f_energetic", "bn_c10_m_energetic",
+]
+
+
+def _profile_from_hint(hint, character_index):
+    """Normalize director hints to one of the real Bangla profile IDs."""
+    hint = str(hint or "").strip().lower()
+    exact = {p.lower(): p for p in BANGLA_CHARACTER_VOICE_POOL}
+    if hint in exact:
+        return exact[hint]
+    female = any(x in hint for x in ("female", "woman", "girl", "mother", "sister"))
+    male = any(x in hint for x in ("male", "man", "boy", "father", "brother"))
+    if female:
+        return BANGLA_CHARACTER_VOICE_POOL[(character_index * 2) % 10]
+    if male:
+        return BANGLA_CHARACTER_VOICE_POOL[((character_index * 2) + 1) % 10]
+    return BANGLA_CHARACTER_VOICE_POOL[character_index % 10]
+
+_original_director_plan = drama_dubbing.director_plan
+
+
+def bangla_director_plan(segments):
+    plan = _original_director_plan(segments)
+    character_slots = {}
+    for i, info in plan.items():
+        char = str(info.get("character") or f"C{{i+1}}")
+        if char not in character_slots:
+            character_slots[char] = len(character_slots)
+        info["profile"] = _profile_from_hint(info.get("profile"), character_slots[char])
+    return plan
+
+
+def natural_bangla_tts(text, out_path, voice, emotion):
+    synthesize_bangla(text, Path(out_path), profile=voice)
+
+
+def quality_master_mix(background, dubbed, music, total, work):
+    """Speech-first mix with no original dialogue/music bed for V1."""
+    out = Path(work) / "master.wav"
+    inputs = ["-i", str(dubbed)]
+    filters = ["[0:a]highpass=f=75,lowpass=f=15000,acompressor=threshold=0.25:ratio=2:attack=20:release=180:makeup=1.0,alimiter=limit=0.94[voice]"]
+    filters.append("[voice]loudnorm=I=-16:TP=-1.5:LRA=8,alimiter=limit=0.95[a]")
+    subprocess.run(["ffmpeg", "-y", *inputs, "-filter_complex", ";".join(filters), "-map", "[a]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", "-t", f"{total:.3f}", str(out)], check=True)
+    return out
+
+if {language!r} == "Bangla":
+    # V1 audio contract: remove original Chinese dialogue and original music.
+    # No original background bed is mixed back into the final output.
+    drama_dubbing.VOICE_POOL = BANGLA_CHARACTER_VOICE_POOL
+    drama_dubbing.director_plan = bangla_director_plan
+    drama_dubbing.make_tts = natural_bangla_tts
+    drama_dubbing.master_mix = quality_master_mix
+
+output, mood, lip = drama_dubbing.dub_video(
+    INPUT,
+    {language!r},
+    requested_voice="auto",
+    preserve_background=False,
+    add_mood_music=False,
+    lip_sync=True,
+)
+
+manifest = output.with_suffix(".json")
+subtitle = output.with_suffix(".srt")
+for path in (output, manifest, subtitle):
+    if path.exists():
+        shutil.copy2(path, ARTIFACTS / path.name)
+
+report = {{
+    "status": "certified" if output.exists() and manifest.exists() and lip and lip.get("applied") else "failed_closed",
+    "output": str(ARTIFACTS / output.name),
+    "manifest": str(ARTIFACTS / manifest.name),
+    "subtitle": str(ARTIFACTS / subtitle.name),
+    "mood": mood,
+    "lip_sync": lip,
+    "voice_engine": "edge-neural-bangla-multicharacter" if {language!r} == "Bangla" else "canonical-openai",
+    "character_voice_profiles": BANGLA_CHARACTER_VOICE_POOL if {language!r} == "Bangla" else [],
+    "audio_mix": "replacement-dialogue-only-no-original-music",
+    "original_dialogue_removed": True,
+    "original_music_removed": True,
+}}
+(ARTIFACTS / "cloud-provider-certification.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+print(json.dumps(report, ensure_ascii=False, indent=2))
 '''
-    # The full notebook source is generated by the canonical pipeline below.
-    source += f'''\nVIDEO_URL = {video_url!r}\nREPO_URL = {repo!r}\nREPO_REF = {ref!r}\nTARGET_LANGUAGE = {language!r}\n\nsubprocess.run(["git", "clone", "--depth", "1", "--branch", REPO_REF, REPO_URL, str(REPO)], check=True)\n\n# Canonical pipeline/runtime requirements.\nsubprocess.run(["python", "-m", "pip", "install", "-q", "-r", str(REPO / "requirements.txt")], check=True)\nsubprocess.run(["python", "-m", "pip", "install", "-q", "edge-tts>=7,<8"], check=True)\n\n# Runtime-only credentials/model URLs are read from Kaggle Secrets.\nos.environ["OPENAI_API_KEY"] = secret("OPENAI_API_KEY", required=True)\nos.environ["WAV2LIP_CHECKPOINT_URL"] = secret("WAV2LIP_CHECKPOINT_URL", required=True)\nos.environ["WAV2LIP_S3FD_URL"] = secret("WAV2LIP_S3FD_URL", required=True)\nos.environ["LIPSYNC_PROVIDER"] = "wav2lip"\nos.environ["FACE_DETECTOR"] = "opencv-haar"\nos.environ["MOUTH_LANDMARK_PROVIDER"] = "mediapipe"\n\nfrom cloud_video_input import download_cloud_video\nfrom drama_dubbing import dub_video\n\nINPUT.parent.mkdir(parents=True, exist_ok=True)\ndownload_cloud_video(VIDEO_URL, INPUT)\nfinal_path, manifest_path, srt_path, report_path = dub_video(\n    INPUT, TARGET_LANGUAGE, requested_voice="auto",\n    preserve_background=False, add_mood_music=False, lip_sync=True,\n    output_dir=ARTIFACTS\n)\nprint(json.dumps({{"final": str(final_path), "manifest": str(manifest_path), "srt": str(srt_path), "report": str(report_path)}}, ensure_ascii=False, indent=2))\n'''
     return {
         "cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": source.splitlines(True)}],
-        "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}, "language_info": {"name": "python"}},
+        "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}, "language_info": {"name": "python", "version": "3.x"}},
         "nbformat": 4,
         "nbformat_minor": 5,
     }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("video_url")
-    parser.add_argument("--repo", default="ajfaysal/smart-ai-social-automation-agent")
-    parser.add_argument("--ref", default="main")
-    parser.add_argument("--language", default="Bangla", choices=["Bangla", "English", "Hindi"])
-    parser.add_argument("--output", default="kaggle_full_pipeline.ipynb")
-    args = parser.parse_args()
+    p = argparse.ArgumentParser()
+    p.add_argument("--video-url", required=True)
+    p.add_argument("--repo", default="ajfaysal/smart-ai-social-automation-agent")
+    p.add_argument("--ref", default="main")
+    p.add_argument("--language", default="Bangla", choices=["Bangla", "English", "Hindi"])
+    p.add_argument("--output", default="kaggle_full_pipeline.ipynb")
+    args = p.parse_args()
     notebook = build_notebook(args.video_url, args.repo, args.ref, args.language)
     Path(args.output).write_text(json.dumps(notebook, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(args.output)
     return 0
 
 
