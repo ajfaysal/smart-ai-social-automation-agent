@@ -1,8 +1,9 @@
 """Audio-layer policy for Chinese drama dubbing.
 
 V1 replaces the original dialogue and original music while retaining the drama
-video itself. Because conventional two-stem Demucs does not provide an SFX stem,
-"preserve_sfx" is explicitly best-effort and never silently claims isolation.
+video itself. Conventional two-stem Demucs does not provide a reliable SFX stem,
+so V1 does not claim that original SFX are preserved when the full original audio
+bed is removed.
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from dataclasses import dataclass
 class AudioPolicy:
     remove_original_dialogue: bool = True
     remove_original_music: bool = True
-    preserve_original_sfx: bool = True
+    preserve_original_sfx: bool = False
 
     @property
     def background_separation_required(self) -> bool:
