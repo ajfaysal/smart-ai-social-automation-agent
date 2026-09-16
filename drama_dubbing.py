@@ -43,7 +43,12 @@ def transcribe(audio_path):
 
 def director_plan(segments):
     payload=[{"i":i,"text":s[2],"start":round(s[0],2),"end":round(s[1],2)} for i,s in enumerate(segments)]
-    system="You are a professional dubbing director. Group sequential dialogue into stable character IDs C1,C2,etc. Infer profile only when reasonably supported. Emotion must be one of neutral,happy,laughing,sad,crying,angry,scared,surprised,romantic,whispering,shouting,apologetic. Return ONLY JSON array with i,character,profile,emotion. Never invent lines."
+    profile_options=",".join(VOICE_POOL)
+    system=("You are a professional dubbing director. Group sequential dialogue into stable character IDs C1,C2,etc. "
+            "Infer profile only when reasonably supported. If profile options are supplied below, profile MUST be one of them; "
+            "otherwise use neutral. Emotion must be one of neutral,happy,laughing,sad,crying,angry,scared,surprised,romantic,"
+            "whispering,shouting,apologetic. Return ONLY JSON array with i,character,profile,emotion. Never invent lines. "
+            f"Allowed profile options: {profile_options}")
     r=api_request("POST","https://api.openai.com/v1/chat/completions",json={"model":os.getenv("DUBBING_DIRECTOR_MODEL",os.getenv("DUBBING_TRANSLATION_MODEL","gpt-4o-mini")),"temperature":0.1,"messages":[{"role":"system","content":system},{"role":"user","content":json.dumps(payload,ensure_ascii=False)}]})
     if not r.ok: raise RuntimeError(r.text)
     text=r.json()["choices"][0]["message"]["content"].strip()
@@ -143,14 +148,11 @@ def dub_video(video_path,target_language,requested_voice="auto",preserve_backgro
         prepared=work/"prepared.mp4"; attach_audio(video_path,final_audio,prepared,total); lip_plan=work/"lip_sync_plan.json"; build_lip_sync_plan(manifest,lip_plan)
         provider=get_lip_sync_provider(); landmark=get_landmark_provider(); face_detector=os.getenv("FACE_DETECTOR","disabled").strip().lower(); lip_result=None; shot_qc=None; shot_manifest=None
         if lip_sync and provider.available() and face_detector in {"opencv","opencv-haar"} and landmark.available():
-            cuts=detect_shots(video_path); times=[float(x["time"]) for x in cuts]; boundaries=[0.0]+[t for t in times if 0<t<total]+[total]; shots=[{"index":i,"start":boundaries[i],"end":boundaries[i+1]} for i in range(len(boundaries)-1) if boundaries[i+1]-boundaries[i]>.03]
-            visual=work/"lip_synced_visual.mp4"; shot_data=process_shots(video_path,final_audio,visual,work/"shot_lipsync",shots,provider); shot_manifest=shot_data["manifest"]; shot_qc=validate_reassembled(visual,total,shots)
-            output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"; attach_audio(visual,final_audio,output,total); lip_result={"applied":any(r["status"]=="applied" for r in shot_data["records"]),"provider":provider.name,"landmark_provider":landmark.name,"reason":"Shot-aware lip-sync completed with landmark-gated per-shot fallback.","shot_manifest":shot_manifest.name}
-        elif lip_sync:
-            output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"; shutil.copy2(prepared,output); lip_result={"applied":False,"provider":provider.name,"landmark_provider":landmark.name,"reason":"Lip-sync requires an available provider, FACE_DETECTOR, and facial-landmark provider; original frames retained."}
+            cuts=detect_shots(video_path); times=[float(x["time"]) for x in cuts]; boundaries=[0.0]+[t for t in times if 0<t<total]+[total]; shots=[{"index":i,"start":boundaries[i],"end":boundaries[i+1]} for i in range(len(boundaries)-1)]
+            lip_result,shot_manifest=process_shots(video_path,final_audio,shots,provider,landmark,face_detector,work)
+            if lip_result and lip_result.get("applied"):
+                prepared=Path(lip_result["output"]); shot_qc=validate_reassembled(prepared,shots,total)
         else:
-            output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"; shutil.copy2(prepared,output)
-        qc=validate_output(output,total,manifest); final_manifest={"version":"2.6.1","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":bool(background),"background_method":"demucs-two-stems" if background else "none","music":{"enabled":bool(music),"dominant_mood":dominant,"license":"original_procedural" if music else None},"mastering":{"target_lufs":-16,"true_peak_db":-1.5},"lip_sync":lip_result or {"applied":False,"provider":"disabled","reason":"Not requested."},"shot_qc":shot_qc,"quality_control":qc,"provider_execution":snapshot(),"segments":manifest}
-        json_path=OUTPUT_DIR/f"{output.stem}.json"; json_path.write_text(json.dumps(final_manifest,ensure_ascii=False,indent=2),encoding="utf-8"); write_srt(manifest,OUTPUT_DIR/f"{output.stem}.srt"); return output,dominant,lip_result
-    finally:
-        shutil.rmtree(work,ignore_errors=True)
+            lip_result={"applied":False,"reason":"provider_or_face_prerequisite_unavailable"}
+        final=OUTPUT_DIR/f"dubbed_{uuid.uuid4().hex[:10]}.mp4"; shutil.copy2(prepared,final); manifest_path=final.with_suffix(".json"); manifest_path.write_text(json.dumps({"video":str(final),"target_language":target_language,"segments":manifest,"providers":snapshot(),"lip_sync":lip_result,"shot_qc":shot_qc,"audio_policy":{"original_dialogue_removed":True,"original_music_removed":not preserve_background,"preserve_original_sfx":False}},ensure_ascii=False,indent=2),encoding="utf-8"); srt=final.with_suffix(".srt"); write_srt(manifest,srt); return final,dominant,lip_result
+    finally: shutil.rmtree(work,ignore_errors=True)
