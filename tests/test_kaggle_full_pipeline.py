@@ -16,9 +16,12 @@ def test_full_notebook_is_secret_free_and_uses_canonical_pipeline():
     assert "OPENAI_API_KEY" in source
     assert "WAV2LIP_CHECKPOINT_URL" in source
     assert "WAV2LIP_S3FD_URL" in source
+    assert "run_cloud_smoke.py" in source
+    assert "--clean-text" in source
     assert "dub_video(" in source
     assert "preserve_background=True" in source
     assert "lip_sync=True" in source
+    assert "text_cleanup" in source
     assert "KAGGLE_API_TOKEN" not in source
     json.dumps(notebook)
 
@@ -39,5 +42,6 @@ def test_bangla_notebook_uses_neural_multicharacter_voice_pool_and_speech_first_
     assert "BANGLA_CHARACTER_VOICE_POOL" in source
     assert source.count("bn_c0") >= 10
     assert "lip_sync=True" in source
+    assert "--clean-text" in source
     assert "KAGGLE_API_TOKEN" not in source
     json.dumps(notebook)
