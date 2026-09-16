@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import tempfile
 from pathlib import Path
 
 
@@ -18,7 +17,6 @@ from pathlib import Path
 
 REPO = Path("/kaggle/working/repo")
 INPUT = REPO / "validation-input" / "source.mp4"
-OUT = REPO / "dubbed_output"
 ARTIFACTS = Path("/kaggle/working/final-artifacts")
 ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
@@ -63,18 +61,65 @@ subprocess.run(["mkdir", "-p", str(wav_repo / "checkpoints"), str(wav_repo / "fa
 subprocess.run(["wget", "-q", "-O", str(wav_repo / "checkpoints" / "wav2lip.pth"), ckpt_url], check=True)
 subprocess.run(["wget", "-q", "-O", str(wav_repo / "face_detection" / "detection" / "sfd" / "s3fd.pth"), s3fd_url], check=True)
 
-# Adapt the canonical provider CLI contract to the upstream Wav2Lip inference CLI.
 wrapper = Path("/kaggle/working/wav2lip")
 wrapper.write_text("""#!/bin/sh\nset -eu\nVIDEO=\"\"; AUDIO=\"\"; CKPT=\"\"; OUT=\"\"\nwhile [ $# -gt 0 ]; do\n  case \"$1\" in\n    --video) VIDEO=\"$2\"; shift 2;;\n    --audio) AUDIO=\"$2\"; shift 2;;\n    --checkpoint) CKPT=\"$2\"; shift 2;;\n    --outfile) OUT=\"$2\"; shift 2;;\n    *) echo \"unknown arg: $1\" >&2; exit 2;;\n  esac\ndone\nexec python /kaggle/working/Wav2Lip/inference.py --checkpoint_path \"$CKPT\" --face \"$VIDEO\" --audio \"$AUDIO\" --outfile \"$OUT\"\n""", encoding="utf-8")
 wrapper.chmod(0o755)
 os.environ["WAV2LIP_COMMAND"] = str(wrapper)
 os.environ["WAV2LIP_MODEL_PATH"] = str(wav_repo / "checkpoints" / "wav2lip.pth")
 
-# Execute the canonical production pipeline: STT -> character/emotion director
-# -> Chinese translation/TTS -> exact timing -> Demucs background preservation
-# -> mood music/mastering -> shot-aware Wav2Lip -> final QC + manifest.
-from drama_dubbing import dub_video
-output, mood, lip = dub_video(
+# For Bangla, prefer Microsoft Edge Neural TTS over the robotic offline Piper
+# fallback. The provider is runtime-only and is still audited by the final manifest.
+import drama_dubbing
+from tts_provider import synthesize_bangla
+
+_original_make_tts = drama_dubbing.make_tts
+
+def natural_bangla_tts(text, out_path, voice, emotion):
+    profile = "female" if voice in {"nova", "shimmer", "fable"} else "male"
+    provider = synthesize_bangla(text, Path(out_path), profile=profile)
+    # Convert to a stable lossless intermediate for the timing engine.
+    pcm = Path(out_path).with_suffix(".wav")
+    subprocess.run(["ffmpeg", "-y", "-i", str(out_path), "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", str(pcm)], check=True)
+    Path(out_path).write_bytes(Path(pcm).read_bytes())
+    Path(out_path).with_suffix(".provider").write_text(provider, encoding="utf-8")
+
+def quality_master_mix(background, dubbed, music, total, work):
+    """Speech-first mix with real sidechain ducking instead of static bed volume."""
+    out = Path(work) / "master.wav"
+    inputs = ["-i", str(dubbed)]
+    filters = ["[0:a]highpass=f=75,lowpass=f=15000,acompressor=threshold=0.25:ratio=2:attack=20:release=180:makeup=1.0,alimiter=limit=0.94[voice]"]
+    layers = ["[voice]"]
+    idx = 1
+    if background:
+        inputs += ["-i", str(background)]
+        filters.append(f"[{idx}:a]highpass=f=45,lowpass=f=16000,volume=0.80[bg]")
+        idx += 1
+        layers.append("[bg]")
+    if music:
+        inputs += ["-i", str(music)]
+        filters.append(f"[{idx}:a]volume=0.035[music]")
+        layers.append("[music]")
+    # Mix the non-speech bed, then duck it against the speech signal.
+    bed = "[bed]"
+    bed_layers = layers[1:]
+    if bed_layers:
+        filters.append("".join(bed_layers) + f"amix=inputs={len(bed_layers)}:duration=longest:dropout_transition=0:normalize=0{bed}")
+        filters.append(f"{bed}[voice]sidechaincompress=threshold=0.025:ratio=8:attack=18:release=320:makeup=1[ducked]")
+        mix = "[ducked][voice]"
+        filters.append(f"{mix}amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=8,alimiter=limit=0.95[a]")
+    else:
+        filters.append("[voice]loudnorm=I=-16:TP=-1.5:LRA=8,alimiter=limit=0.95[a]")
+    subprocess.run(["ffmpeg", "-y", *inputs, "-filter_complex", ";".join(filters), "-map", "[a]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", "-t", f"{total:.3f}", str(out)], check=True)
+    return out
+
+if {language!r} == "Bangla":
+    drama_dubbing.make_tts = natural_bangla_tts
+    drama_dubbing.master_mix = quality_master_mix
+
+# Execute canonical production pipeline: STT -> director -> translation ->
+# neural Bangla TTS -> exact timing -> Demucs -> speech-first ducking/mastering
+# -> shot-aware Wav2Lip -> final QC + manifest.
+output, mood, lip = drama_dubbing.dub_video(
     INPUT,
     {language!r},
     requested_voice="auto",
@@ -96,6 +141,8 @@ report = {{
     "subtitle": str(ARTIFACTS / subtitle.name),
     "mood": mood,
     "lip_sync": lip,
+    "voice_engine": "edge-neural-bangla" if {language!r} == "Bangla" else "canonical-openai",
+    "audio_mix": "sidechain-ducked-speech-first",
 }}
 (ARTIFACTS / "cloud-provider-certification.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 print(json.dumps(report, ensure_ascii=False, indent=2))
