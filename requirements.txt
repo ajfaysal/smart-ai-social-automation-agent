@@ -7,3 +7,4 @@ numpy
 demucs
 opencv-python-headless
 mediapipe
+edge-tts
