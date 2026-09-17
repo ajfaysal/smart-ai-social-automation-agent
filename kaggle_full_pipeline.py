@@ -46,8 +46,6 @@ if {language!r} == "Bangla":
     subprocess.run(["pip", "install", "-q", "edge-tts>=7.0,<8"], check=True)
 subprocess.run(["python", "run_cloud_smoke.py", {video_url!r}, "--output", str(INPUT), "--report", str(REPO / "validation-artifacts" / "cloud-input.json")], cwd=REPO, check=True)
 
-# Clean burned-in Chinese text before dubbing. The cleaner emits video-only;
-# muxing the source audio back here is temporary so dub_video can extract it.
 cleanup_code = "from pathlib import Path; from scene_analysis import detect_shots; from video_text_cleaner import clean_video; p=Path('validation-input/source.mp4'); cuts=[x['time'] for x in detect_shots(p)]; clean_video(p, Path('validation-input/cleaned-video.mp4'), Path('validation-artifacts/text-cleanup.json'), languages=['ch_sim','en'], scene_cuts=cuts)"
 subprocess.run(["python", "-c", cleanup_code], cwd=REPO, check=True)
 MUXED = REPO / "validation-input" / "cleaned-with-audio.mp4"
@@ -63,20 +61,7 @@ subprocess.run(["wget", "-q", "-O", str(wav_repo / "checkpoints" / "wav2lip.pth"
 subprocess.run(["wget", "-q", "-O", str(wav_repo / "face_detection" / "detection" / "sfd" / "s3fd.pth"), s3fd_url], check=True)
 
 wrapper = Path("/kaggle/working/wav2lip")
-wrapper.write_text("""#!/bin/sh
-set -eu
-VIDEO=""; AUDIO=""; CKPT=""; OUT=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --video) VIDEO="$2"; shift 2;;
-    --audio) AUDIO="$2"; shift 2;;
-    --checkpoint) CKPT="$2"; shift 2;;
-    --outfile) OUT="$2"; shift 2;;
-    *) echo "unknown arg: $1" >&2; exit 2;;
-  esac
-done
-exec python /kaggle/working/Wav2Lip/inference.py --checkpoint_path "$CKPT" --face "$VIDEO" --audio "$AUDIO" --outfile "$OUT"
-""", encoding="utf-8")
+wrapper.write_text("#!/bin/sh\\nset -eu\\nVIDEO=\\\"\\\"; AUDIO=\\\"\\\"; CKPT=\\\"\\\"; OUT=\\\"\\\"\\nwhile [ $# -gt 0 ]; do\\n  case \\\"$1\\\" in\\n    --video) VIDEO=\\\"$2\\\"; shift 2;;\\n    --audio) AUDIO=\\\"$2\\\"; shift 2;;\\n    --checkpoint) CKPT=\\\"$2\\\"; shift 2;;\\n    --outfile) OUT=\\\"$2\\\"; shift 2;;\\n    *) echo \\\"unknown arg: $1\\\" >&2; exit 2;;\\n  esac\\ndone\\nexec python /kaggle/working/Wav2Lip/inference.py --checkpoint_path \\\"$CKPT\\\" --face \\\"$VIDEO\\\" --audio \\\"$AUDIO\\\" --outfile \\\"$OUT\\\"\\n", encoding="utf-8")
 wrapper.chmod(0o755)
 os.environ["WAV2LIP_COMMAND"] = str(wrapper)
 os.environ["WAV2LIP_MODEL_PATH"] = str(wav_repo / "checkpoints" / "wav2lip.pth")
