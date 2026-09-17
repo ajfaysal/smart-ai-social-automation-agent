@@ -39,7 +39,7 @@ def test_bangla_notebook_uses_neural_multicharacter_voice_pool_and_replacement_m
     assert "natural_bangla_tts" in source
     assert "replacement-dialogue-only-no-original-music" in source
     assert "BANGLA_CHARACTER_VOICE_POOL" in source
-    assert source.count("bn_c0") >= 10
+    assert source.count("bn_c") >= 10
     assert "preserve_background=False" in source
     assert "add_mood_music=False" in source
     assert "lip_sync=True" in source

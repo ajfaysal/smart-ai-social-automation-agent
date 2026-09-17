@@ -27,5 +27,5 @@ def test_kaggle_runner_calls_profile_aware_tts_and_normalizes_director_hints():
     assert "drama_dubbing.VOICE_POOL = BANGLA_CHARACTER_VOICE_POOL" in source
     assert "drama_dubbing.director_plan = bangla_director_plan" in source
     assert "_profile_from_hint" in source
-    assert '"female", "woman", "girl"' in source
-    assert '"male", "man", "boy"' in source
+    assert '"female", "woman", "girl"' in source or "'female', 'woman', 'girl'" in source
+    assert '"male", "man", "boy"' in source or "'male', 'man', 'boy'" in source
