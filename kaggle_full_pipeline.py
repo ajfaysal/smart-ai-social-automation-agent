@@ -7,8 +7,6 @@ from pathlib import Path
 
 
 def build_notebook(video_url: str, repo: str, ref: str, language: str = "Bangla") -> dict:
-    # Use a non-f-string template so the generated notebook can safely contain
-    # Python dictionaries, shell variables and command templates.
     source = """import json, os, shutil, subprocess
 from pathlib import Path
 
@@ -48,7 +46,6 @@ if __LANGUAGE__ == 'Bangla':
     subprocess.run(['pip', 'install', '-q', 'edge-tts>=7.0,<8'], check=True)
 subprocess.run(['python', 'run_cloud_smoke.py', __VIDEO_URL__, '--output', str(INPUT), '--report', str(REPO / 'validation-artifacts' / 'cloud-input.json')], cwd=REPO, check=True)
 
-# Burned-in Chinese text is cleaned before any new dialogue is synthesized.
 cleanup_code = "from pathlib import Path; from scene_analysis import detect_shots; from video_text_cleaner import clean_video; p=Path('validation-input/source.mp4'); cuts=[x['time'] for x in detect_shots(p)]; clean_video(p, Path('validation-input/cleaned-video.mp4'), Path('validation-artifacts/text-cleanup.json'), languages=['ch_sim','en'], scene_cuts=cuts)"
 subprocess.run(['python', '-c', cleanup_code], cwd=REPO, check=True)
 MUXED = REPO / 'validation-input' / 'cleaned-with-audio.mp4'
@@ -64,7 +61,7 @@ subprocess.run(['wget', '-q', '-O', str(wav_repo / 'checkpoints' / 'wav2lip.pth'
 subprocess.run(['wget', '-q', '-O', str(wav_repo / 'face_detection' / 'detection' / 'sfd' / 's3fd.pth'), s3fd_url], check=True)
 
 wrapper = Path('/kaggle/working/wav2lip')
-wrapper.write_text('#!/bin/sh\\nset -eu\\nexec python /kaggle/working/Wav2Lip/inference.py --checkpoint_path "$4" --face "$1" --audio "$2" --outfile "$3"\\n', encoding='utf-8')
+wrapper.write_text('#!/bin/sh\\nset -eu\\nVIDEO=\\\"\\\"; AUDIO=\\\"\\\"; CKPT=\\\"\\\"; OUT=\\\"\\\"\\nwhile [ $# -gt 0 ]; do\\n  case \\\"$1\\\" in\\n    --video) VIDEO=\\\"$2\\\"; shift 2;;\\n    --audio) AUDIO=\\\"$2\\\"; shift 2;;\\n    --checkpoint) CKPT=\\\"$2\\\"; shift 2;;\\n    --outfile) OUT=\\\"$2\\\"; shift 2;;\\n    *) echo \\\"unknown arg: $1\\\" >&2; exit 2;;\\n  esac\\ndone\\nexec python /kaggle/working/Wav2Lip/inference.py --checkpoint_path \\\"$CKPT\\\" --face \\\"$VIDEO\\\" --audio \\\"$AUDIO\\\" --outfile \\\"$OUT\\\"\\n', encoding='utf-8')
 wrapper.chmod(0o755)
 os.environ['WAV2LIP_COMMAND'] = str(wrapper)
 os.environ['WAV2LIP_MODEL_PATH'] = str(wav_repo / 'checkpoints' / 'wav2lip.pth')
@@ -101,7 +98,7 @@ def bangla_director_plan(segments):
     return plan
 
 def natural_bangla_tts(text, out_path, voice, emotion):
-    synthesize_bangla(text, Path(out_path), profile=voice, character_id=str(voice))
+    synthesize_bangla(text, Path(out_path), profile=voice)
 
 def quality_master_mix(background, dubbed, music, total, work):
     out = Path(work) / 'master.wav'
@@ -140,7 +137,12 @@ report = {
 print(json.dumps(report, ensure_ascii=False, indent=2))
 """
     source = source.replace("__REF__", repr(ref)).replace("__REPO__", repo).replace("__VIDEO_URL__", repr(video_url)).replace("__LANGUAGE__", repr(language))
-    return {"cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": source.splitlines(True)}], "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}, "nbformat": 4, "nbformat_minor": 5}}
+    return {
+        "cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": source.splitlines(True)}],
+        "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}},
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
 
 
 def main() -> int:
