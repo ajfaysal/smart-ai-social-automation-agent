@@ -15,6 +15,8 @@ from pathlib import Path
 
 from kaggle_full_pipeline import build_notebook
 
+DEFAULT_VIDEO_URL = "https://drive.google.com/file/d/1brOpsZOsoM2oWijxbYyHKDlDrsQTnO7-/view?usp=drivesdk"
+
 
 def _token() -> str:
     token = os.getenv("KAGGLE_API_TOKEN") or os.getenv("KAGGLE_API_KEY")
@@ -25,11 +27,11 @@ def _token() -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Push the full drama dubbing pipeline to a Kaggle GPU kernel")
-    parser.add_argument("--video-url", required=True)
+    parser.add_argument("--video-url", default=DEFAULT_VIDEO_URL)
     parser.add_argument("--repo", default="ajfaysal/smart-ai-social-automation-agent")
     parser.add_argument("--ref", default="main")
     parser.add_argument("--language", default="Bangla", choices=["Bangla", "English", "Hindi"])
-    parser.add_argument("--kernel-slug", default="drama-dubbing-full-pipeline")
+    parser.add_argument("--kernel-slug", default="drama-dubbing-chinese-bangla")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -46,7 +48,7 @@ def main() -> int:
         )
         metadata = {
             "id": f"ajfaysal/{args.kernel_slug}",
-            "title": "Drama Dubbing Full Pipeline",
+            "title": "Chinese Drama → Bangla Dubbing",
             "code_file": "kaggle_full_pipeline.ipynb",
             "language": "python",
             "kernel_type": "notebook",
