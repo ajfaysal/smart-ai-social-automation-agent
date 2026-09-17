@@ -92,7 +92,7 @@ BANGLA_CHARACTER_VOICE_POOL = [
 
 def _profile_from_hint(hint, character_index):
     hint = str(hint or "").strip().lower()
-    exact = {{p.lower(): p for p in BANGLA_CHARACTER_VOICE_POOL}}
+    exact = {p.lower(): p for p in BANGLA_CHARACTER_VOICE_POOL}
     if hint in exact:
         return exact[hint]
     female = any(x in hint for x in ("female", "woman", "girl", "mother", "sister"))
@@ -107,9 +107,9 @@ _original_director_plan = drama_dubbing.director_plan
 
 def bangla_director_plan(segments):
     plan = _original_director_plan(segments)
-    character_slots = {{}}
+    character_slots = {}
     for i, info in plan.items():
-        char = str(info.get("character") or f"C{{i+1}}")
+        char = str(info.get("character") or f"C{i+1}")
         if char not in character_slots:
             character_slots[char] = len(character_slots)
         info["profile"] = _profile_from_hint(info.get("profile"), character_slots[char])
@@ -120,7 +120,7 @@ def natural_bangla_tts(text, out_path, voice, emotion):
 
 def quality_master_mix(background, dubbed, music, total, work):
     out = Path(work) / "master.wav"
-    subprocess.run(["ffmpeg", "-y", "-i", str(dubbed), "-filter_complex", "[0:a]highpass=f=75,lowpass=f=15000,acompressor=threshold=0.25:ratio=2:attack=20:release=180:makeup=1.0,alimiter=limit=0.94,loudnorm=I=-16:TP=-1.5:LRA=8,alimiter=limit=0.95[a]", "-map", "[a]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", "-t", f"{{total:.3f}}", str(out)], check=True)
+    subprocess.run(["ffmpeg", "-y", "-i", str(dubbed), "-filter_complex", "[0:a]highpass=f=75,lowpass=f=15000,acompressor=threshold=0.25:ratio=2:attack=20:release=180:makeup=1.0,alimiter=limit=0.94,loudnorm=I=-16:TP=-1.5:LRA=8,alimiter=limit=0.95[a]", "-map", "[a]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", "-t", f"{total:.3f}", str(out)], check=True)
     return out
 
 if {language!r} == "Bangla":
@@ -136,7 +136,7 @@ for path in (output, manifest, subtitle):
     if path.exists(): shutil.copy2(path, ARTIFACTS / path.name)
 if CLEAN_REPORT.exists(): shutil.copy2(CLEAN_REPORT, ARTIFACTS / CLEAN_REPORT.name)
 
-report = {{
+report = {
     "status": "certified" if output.exists() and manifest.exists() and lip and lip.get("applied") else "failed_closed",
     "output": str(ARTIFACTS / output.name),
     "manifest": str(ARTIFACTS / manifest.name),
@@ -150,11 +150,11 @@ report = {{
     "original_dialogue_removed": True,
     "original_music_removed": True,
     "source_text_cleanup": "ocr-guided-easyocr-opencv-inpaint",
-}}
+}
 (ARTIFACTS / "cloud-provider-certification.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 print(json.dumps(report, ensure_ascii=False, indent=2))
 '''
-    return {"cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": source.splitlines(True)}], "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}, "nbformat": 4, "nbformat_minor": 5}
+    return {"cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": source.splitlines(True)}], "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}, "nbformat": 4, "nbformat_minor": 5}}
 
 
 def main() -> int:
