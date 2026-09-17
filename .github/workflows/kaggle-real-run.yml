@@ -1,0 +1,66 @@
+name: Kaggle Real Chinese Drama Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_language:
+        description: "V1 target language"
+        required: true
+        default: "Bangla"
+        type: choice
+        options:
+          - Bangla
+          - English
+          - Hindi
+      video_url:
+        description: "Public HTTP(S) drama video URL"
+        required: true
+        default: "https://drive.google.com/file/d/1brOpsZOsoM2oWijxbYyHKDlDrsQTnO7-/view?usp=drivesdk"
+        type: string
+      kernel_slug:
+        description: "Private Kaggle kernel slug"
+        required: true
+        default: "drama-dubbing-chinese-bangla"
+        type: string
+
+jobs:
+  push-to-kaggle:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_API_KEY: ${{ secrets.KAGGLE_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Kaggle CLI
+        run: python -m pip install --upgrade pip kaggle
+
+      - name: Verify Kaggle credential is available
+        shell: bash
+        run: |
+          if [[ -z "${KAGGLE_API_TOKEN:-}" && -z "${KAGGLE_API_KEY:-}" ]]; then
+            echo "Missing GitHub Actions secret KAGGLE_API_TOKEN or KAGGLE_API_KEY."
+            exit 1
+          fi
+
+      - name: Push private GPU notebook to Kaggle
+        run: |
+          python kaggle_gpu_orchestrator.py \
+            --video-url "${{ inputs.video_url }}" \
+            --language "${{ inputs.target_language }}" \
+            --kernel-slug "${{ inputs.kernel_slug }}"
+
+      - name: Print operator handoff
+        run: |
+          echo "Kaggle kernel push completed."
+          echo "Open Kaggle and run the private kernel after configuring OPENAI_API_KEY, WAV2LIP_CHECKPOINT_URL, and WAV2LIP_S3FD_URL as Kaggle Secrets."
+          echo "The repository does not mark a run certified until final MP4 + manifest + lip-sync applied=true are produced."
