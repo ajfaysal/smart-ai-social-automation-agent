@@ -5,7 +5,13 @@ import argparse
 import json
 from pathlib import Path
 
-from speaker_identity import character_map, extract_reference_clip, run_diarization_command, write_identity_manifest
+from speaker_identity import (
+    character_map,
+    extract_reference_clip,
+    normalize_speaker_id,
+    run_diarization_command,
+    write_identity_manifest,
+)
 
 
 def build_voice_bank(audio: Path, backend: str, manifest: Path, reference_dir: Path | None = None) -> dict:
@@ -15,7 +21,7 @@ def build_voice_bank(audio: Path, backend: str, manifest: Path, reference_dir: P
 
     if result.status == "SUCCEEDED" and reference_dir:
         for sid, identity in list(identities.items()):
-            turns = [t for t in result.turns if t.speaker_id == sid or t.speaker_id == sid.replace("S", "SPEAKER_")]
+            turns = [t for t in result.turns if normalize_speaker_id(t.speaker_id) == sid]
             if not turns:
                 continue
             turn = max(turns, key=lambda item: (item.end - item.start) * item.confidence)
