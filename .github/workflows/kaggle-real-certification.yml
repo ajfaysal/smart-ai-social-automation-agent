@@ -1,0 +1,103 @@
+name: Kaggle Real Certification Dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: Public video URL used as runtime input
+        required: true
+        default: https://drive.google.com/file/d/1brOpsZOsoM2oWijxbYyHKDlDrsQTnO7-/view?usp=drivesdk
+        type: string
+      language:
+        description: V1 target language
+        required: true
+        default: Bangla
+        type: choice
+        options:
+          - Bangla
+          - English
+          - Hindi
+      kernel_slug:
+        description: Optional private Kaggle kernel slug suffix
+        required: false
+        default: drama-dubbing-certification
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Kaggle CLI and pipeline dependencies
+        run: |
+          python -m pip install --disable-pip-version-check kaggle
+          python -m pip install --disable-pip-version-check -r requirements.txt -r requirements-cloud-runner.txt
+      - name: Validate certification preflight
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          WAV2LIP_CHECKPOINT_URL: ${{ secrets.WAV2LIP_CHECKPOINT_URL }}
+          WAV2LIP_S3FD_URL: ${{ secrets.WAV2LIP_S3FD_URL }}
+          PYANNOTE_DIARIZATION_COMMAND: ${{ secrets.PYANNOTE_DIARIZATION_COMMAND }}
+          THREE_D_SPEAKER_DIARIZATION_COMMAND: ${{ secrets.THREE_D_SPEAKER_DIARIZATION_COMMAND }}
+          VIDEO_URL: ${{ inputs.video_url }}
+          TARGET_LANGUAGE: ${{ inputs.language }}
+        run: |
+          python - <<'PY'
+          import os
+          from real_run_preflight import build_preflight
+          p = build_preflight(
+              video_url=os.environ["VIDEO_URL"],
+              target_language=os.environ["TARGET_LANGUAGE"],
+              require_openai=True,
+              require_wav2lip=True,
+              require_diarization=True,
+          )
+          print(p)
+          if not p.ready:
+              raise SystemExit(2)
+          PY
+      - name: Dispatch private Kaggle GPU kernel
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          VIDEO_URL: ${{ inputs.video_url }}
+          TARGET_LANGUAGE: ${{ inputs.language }}
+          KERNEL_SLUG: ${{ inputs.kernel_slug }}
+        run: |
+          test -n "$KAGGLE_API_TOKEN" || { echo "Missing GitHub secret KAGGLE_API_TOKEN"; exit 2; }
+          python kaggle_gpu_orchestrator.py             --video-url "$VIDEO_URL"             --language "$TARGET_LANGUAGE"             --kernel-slug "$KERNEL_SLUG"
+      - name: Publish dispatch metadata
+        env:
+          VIDEO_URL: ${{ inputs.video_url }}
+          TARGET_LANGUAGE: ${{ inputs.language }}
+          KERNEL_SLUG: ${{ inputs.kernel_slug }}
+        run: |
+          mkdir -p validation-artifacts
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path("validation-artifacts/kaggle-dispatch.json").write_text(
+              json.dumps({
+                  "status": "submitted",
+                  "language": os.environ["TARGET_LANGUAGE"],
+                  "kernel_slug": os.environ["KERNEL_SLUG"],
+                  "video_url": os.environ["VIDEO_URL"],
+                  "certification_status": "pending_kaggle_execution",
+                  "note": "Submission is not certification; certification.json is authoritative only after the Kaggle kernel completes.",
+              }, indent=2),
+              encoding="utf-8",
+          )
+          PY
+      - name: Upload dispatch metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaggle-certification-dispatch
+          path: validation-artifacts/kaggle-dispatch.json
