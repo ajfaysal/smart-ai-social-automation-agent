@@ -14,6 +14,8 @@ def build_segment_routes(routed_segments, routes):
         row["character_id"] = route.character_id if route else None
         row["voice_profile"] = route.voice_profile if route else None
         row["reference_audio"] = route.reference_audio if route else None
+        row["reference_qc"] = route.reference_qc if route else None
+        row["reference_selection_score"] = route.reference_selection_score if route else None
         row["routing_status"] = "SUCCEEDED" if route else "UNAVAILABLE"
         result.append(row)
     return result

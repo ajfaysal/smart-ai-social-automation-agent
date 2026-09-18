@@ -30,3 +30,14 @@ def test_low_confidence_identity_is_not_routed():
     turns = (SpeakerTurn("SPEAKER_00", 0, 2, 0.95),)
     identities = {"S01": CharacterIdentity("C01", "S01", 0.69, None)}
     assert build_voice_routes(turns, identities) == {}
+
+
+def test_segment_routes_carry_reference_qc_evidence():
+    from speaker_routing_manifest import build_segment_routes
+    qc = ReferenceVoiceQC("/runtime/refs/S01.wav", 2.0, 16000, 1, 2, 0.1, "SUCCEEDED", None, None)
+    turns = (SpeakerTurn("S01", 0, 2, 0.95),)
+    identities = {"S01": CharacterIdentity("C01", "S01", 0.95, "/runtime/refs/S01.wav", "female", qc, (2.0, 0.95, 0.0))}
+    routes = build_voice_routes(turns, identities, {"C01": "bn_c01_f_young"})
+    rows = build_segment_routes([{"speaker_id": "S01", "start": 0.0, "end": 2.0, "text": "hello"}], routes)
+    assert rows[0]["reference_qc"].status == "SUCCEEDED"
+    assert rows[0]["reference_selection_score"] == (2.0, 0.95, 0.0)
