@@ -12,7 +12,7 @@ import os
 import shlex
 import subprocess
 
-from reference_voice_qc import validate_reference_voice
+from reference_voice_qc import ReferenceVoiceQC, validate_reference_voice
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
@@ -184,3 +184,20 @@ def extract_best_reference_clips(
         end = min(best.end, best.start + max_seconds)
         references[sid] = extract_reference_clip(audio, sid, best.start, end, output_dir, max_seconds=max_seconds)
     return references
+
+
+def extract_best_reference_clips_with_qc(audio: Path, turns: Iterable[SpeakerTurn], output_dir: Path, *, min_seconds: float = 1.5, max_seconds: float = 8.0) -> dict[str, tuple[Path, ReferenceVoiceQC, tuple[float, float, float]]]:
+    """Return each selected reference with deterministic selection and QC evidence."""
+    candidates: dict[str, list[SpeakerTurn]] = {}
+    for turn in turns:
+        if turn.end <= turn.start: continue
+        if min(float(turn.end - turn.start), max_seconds) >= min_seconds:
+            candidates.setdefault(normalize_speaker_id(turn.speaker_id), []).append(turn)
+    selected = {}
+    for sid, speaker_turns in candidates.items():
+        best = max(speaker_turns, key=lambda t: _reference_score(audio, t, max_seconds=max_seconds))
+        end = min(best.end, best.start + max_seconds)
+        path = extract_reference_clip(audio, sid, best.start, end, output_dir, max_seconds=max_seconds)
+        qc = validate_reference_voice(path, max_seconds=min(float(max_seconds), 8.0))
+        selected[sid] = (path, qc, _reference_score(audio, best, max_seconds=max_seconds))
+    return selected
