@@ -43,11 +43,21 @@ def test_rejects_too_short_audio(tmp_path):
 def test_bangla_make_tts_uses_reference_aware_provider(monkeypatch, tmp_path):
     import drama_dubbing
     calls = {}
+
     def fake_synthesize(text, out_path, **kwargs):
         calls.update(kwargs)
+
     monkeypatch.setattr("tts_provider.synthesize_bangla", fake_synthesize)
     out = tmp_path / "voice.wav"
-    drama_dubbing.make_tts("হ্যালো", out, "bn_c01_f_young", "sad", character_id="C01", reference_audio="/runtime/C01.wav", target_language="Bangla")
+    drama_dubbing.make_tts(
+        "হ্যালো",
+        out,
+        "bn_c01_f_young",
+        "sad",
+        character_id="C01",
+        reference_audio="/runtime/C01.wav",
+        target_language="Bangla",
+    )
     assert calls["character_id"] == "C01"
     assert calls["reference_audio"] == "/runtime/C01.wav"
 
@@ -57,13 +67,24 @@ def test_reference_tts_command_receives_acting_directive(monkeypatch, tmp_path):
     reference = tmp_path / "C01.wav"
     reference.write_bytes(b"reference")
     calls = {}
-    monkeypatch.setenv("BANGLA_REFERENCE_TTS_COMMAND", "echo {acting_directive} {character} {reference} {output}")
+    monkeypatch.setenv(
+        "BANGLA_REFERENCE_TTS_COMMAND",
+        "echo {acting_directive} {character} {reference} {output}",
+    )
+
     def fake_run(command, shell, check):
         calls["command"] = command
         calls["shell"] = shell
         calls["check"] = check
+
     monkeypatch.setattr(tts_provider.subprocess, "run", fake_run)
-    tts_provider._reference_speak("hello", tmp_path / "out.wav", "C01", str(reference), "sad, whispering")
+    tts_provider._reference_speak(
+        "hello",
+        tmp_path / "out.wav",
+        "C01",
+        str(reference),
+        "sad, whispering",
+    )
     assert "sad, whispering" in calls["command"]
     assert "C01" in calls["command"]
     assert calls["shell"] is True
@@ -73,30 +94,123 @@ def test_reference_tts_command_receives_acting_directive(monkeypatch, tmp_path):
 def test_multilingual_make_tts_uses_reference_provider_when_required(monkeypatch, tmp_path):
     import drama_dubbing
     calls = {}
-    def fake_synthesize(text, out_path, **kwargs):
-        calls.update(kwargs)
     monkeypatch.setenv("REQUIRE_REFERENCE_VOICE_CLONING", "true")
-    monkeypatch.setattr("tts_provider.synthesize_reference_tts", fake_synthesize)
+    monkeypatch.setattr("tts_provider.synthesize_reference_tts", lambda text, out_path, **kwargs: calls.update(kwargs))
     out = tmp_path / "voice.wav"
-    drama_dubbing.make_tts("Hello", out, "nova", "sad", character_id="C01", reference_audio="/runtime/C01.wav", target_language="English")
+    drama_dubbing.make_tts(
+        "Hello",
+        out,
+        "nova",
+        "sad",
+        character_id="C01",
+        reference_audio="/runtime/C01.wav",
+        target_language="English",
+    )
     assert calls["character_id"] == "C01"
     assert calls["target_language"] == "English"
     assert calls["reference_audio"] == "/runtime/C01.wav"
 
 
+def test_multilingual_reference_tts_uses_exact_supplied_reference(monkeypatch, tmp_path):
+    import tts_provider
+
+    supplied_reference = tmp_path / "selected-C01.wav"
+    re_resolved_reference = tmp_path / "different-C01.wav"
+    out = tmp_path / "voice.wav"
+    supplied_reference.write_bytes(b"selected")
+    re_resolved_reference.write_bytes(b"different")
+    captured = {}
+
+    monkeypatch.setattr(
+        tts_provider,
+        "validate_reference_voice",
+        lambda path: type("QC", (), {"status": "SUCCEEDED"})(),
+    )
+    monkeypatch.setattr(
+        tts_provider,
+        "choose_engine",
+        lambda *args, **kwargs: ("fish-speech", re_resolved_reference),
+    )
+    monkeypatch.setattr(
+        tts_provider,
+        "run_command_engine",
+        lambda engine, text, output, reference, character_id, **kwargs: (
+            captured.update(reference=Path(reference), language=kwargs["target_language"]),
+            out.write_bytes(b"audio"),
+        )[1],
+    )
+    monkeypatch.setattr(tts_provider, "validate_tts_artifact", lambda path: None)
+
+    tts_provider.synthesize_reference_tts(
+        "Hello",
+        out,
+        "C01",
+        "English",
+        str(supplied_reference),
+    )
+
+    assert captured["reference"] == supplied_reference
+    assert captured["reference"] != re_resolved_reference
+    assert captured["language"] == "English"
+
+
 def test_multilingual_reference_tts_records_provider_execution(monkeypatch, tmp_path):
     import tts_provider
     from provider_runtime import reset_provider_executions, snapshot
+
     reference = tmp_path / "C01.wav"
     out = tmp_path / "voice.wav"
-    monkeypatch.setattr(tts_provider, "validate_reference_voice", lambda path: type("QC", (), {"status": "SUCCEEDED"})())
+    monkeypatch.setattr(
+        tts_provider,
+        "validate_reference_voice",
+        lambda path: type("QC", (), {"status": "SUCCEEDED"})(),
+    )
     monkeypatch.setattr(tts_provider, "validate_tts_artifact", lambda path: None)
-    monkeypatch.setattr(tts_provider, "choose_engine", lambda *args, **kwargs: ("fish-speech", reference))
-    monkeypatch.setattr(tts_provider, "run_command_engine", lambda *args, **kwargs: out.write_bytes(b"audio"))
+    monkeypatch.setattr(
+        tts_provider,
+        "choose_engine",
+        lambda *args, **kwargs: ("fish-speech", reference),
+    )
+    monkeypatch.setattr(
+        tts_provider,
+        "run_command_engine",
+        lambda *args, **kwargs: out.write_bytes(b"audio"),
+    )
     reset_provider_executions()
-    tts_provider.synthesize_reference_tts("Hello", out, "C01", "English", str(reference))
+    tts_provider.synthesize_reference_tts(
+        "Hello", out, "C01", "English", str(reference)
+    )
     assert snapshot()["fish-speech"]["state"] == "SUCCEEDED"
     assert snapshot()["fish-speech"]["applied"] is True
+
+
+def test_multilingual_reference_tts_records_failure_and_does_not_apply(monkeypatch, tmp_path):
+    import tts_provider
+    from provider_runtime import reset_provider_executions, snapshot
+
+    reference = tmp_path / "C01.wav"
+    out = tmp_path / "voice.wav"
+    monkeypatch.setattr(
+        tts_provider,
+        "validate_reference_voice",
+        lambda path: type("QC", (), {"status": "SUCCEEDED"})(),
+    )
+    monkeypatch.setattr(tts_provider, "choose_engine", lambda *args, **kwargs: ("fish-speech", reference))
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("provider boom")
+
+    monkeypatch.setattr(tts_provider, "run_command_engine", fail)
+    reset_provider_executions()
+
+    with pytest.raises(RuntimeError, match="provider boom"):
+        tts_provider.synthesize_reference_tts(
+            "Hello", out, "C01", "English", str(reference)
+        )
+
+    record = snapshot()["fish-speech"]
+    assert record["state"] == "FAILED"
+    assert record["applied"] is False
 
 
 def test_open_source_bangla_reference_tts_validates_output(monkeypatch, tmp_path):
