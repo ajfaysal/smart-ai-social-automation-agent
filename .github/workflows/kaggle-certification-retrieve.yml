@@ -1,0 +1,55 @@
+name: Retrieve Kaggle Real Certification
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_ref:
+        description: Fully qualified Kaggle kernel ref, e.g. ajfaysal/drama-dubbing-certification
+        required: true
+        type: string
+      wait_seconds:
+        description: Maximum seconds to wait for completion (0 = status only)
+        required: false
+        default: '0'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  retrieve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Kaggle CLI
+        run: python -m pip install --disable-pip-version-check kaggle
+      - name: Check or wait for Kaggle completion
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          KERNEL_REF: ${{ inputs.kernel_ref }}
+          WAIT_SECONDS: ${{ inputs.wait_seconds }}
+        run: |
+          test -n "$KAGGLE_API_TOKEN" || { echo "Missing GitHub secret KAGGLE_API_TOKEN"; exit 2; }
+          python kaggle_certification_operator.py "$KERNEL_REF"             --timeout "$WAIT_SECONDS"             --poll 30             --output-dir kaggle-certification-output
+      - name: Validate certification evidence
+        run: |
+          test -f kaggle-certification-output/certification.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("kaggle-certification-output/certification.json")
+          data = json.loads(p.read_text(encoding="utf-8"))
+          assert data.get("certified") is True, data
+          print("REAL CERTIFICATION: certified=true")
+          PY
+      - name: Upload real certification artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaggle-real-certification
+          path: kaggle-certification-output/
+          if-no-files-found: error
