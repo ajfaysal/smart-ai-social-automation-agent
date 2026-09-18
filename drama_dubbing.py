@@ -3,6 +3,7 @@ from pathlib import Path
 from multilingual_voice_routing import voice_for_character
 from demucs_provider import separate as audited_demucs_separate
 from provider_runtime import finalize, record, reset_provider_executions, snapshot
+from provider_evidence_qc import ingest_provider_evidence
 import requests
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
@@ -132,19 +133,7 @@ def write_srt(manifest,path):
 
 def dub_video(video_path,target_language,requested_voice="auto",preserve_background=True,add_mood_music=True,lip_sync=False,speaker_routing=None,provider_evidence=None):
     reset_provider_executions()
-    for name, evidence in (provider_evidence or {}).items():
-        if not isinstance(evidence, dict):
-            raise RuntimeError(f"Malformed provider evidence for {name}: expected an object.")
-        state = evidence.get("state")
-        if state == "succeeded":
-            artifact = evidence.get("artifact")
-            if not isinstance(artifact, str) or not artifact.strip():
-                raise RuntimeError(f"Malformed provider evidence for {name}: succeeded state requires an artifact path.")
-            record(finalize(name, configured=True, attempted=True, artifact=Path(artifact), min_bytes=1, reason=None, version=evidence.get("version"), capabilities=evidence.get("capabilities", [])))
-        elif state == "failed":
-            finalize(name, configured=True, attempted=True, reason=evidence.get("reason", "provider_failed"), version=evidence.get("version"), capabilities=evidence.get("capabilities", []))
-        else:
-            finalize(name, configured=bool(evidence.get("configured", False)), attempted=False, reason=evidence.get("reason", "provider_not_attempted"), version=evidence.get("version"), capabilities=evidence.get("capabilities", []))
+    ingest_provider_evidence(provider_evidence or {})
     work=Path(tempfile.mkdtemp(prefix="dubstudio_"))
     try:
         total=duration(video_path); source_audio=work/"source.wav"; run(["ffmpeg","-y","-i",str(video_path),"-vn","-ar","48000","-ac","2","-c:a","pcm_s16le",str(source_audio)])
