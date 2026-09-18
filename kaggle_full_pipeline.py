@@ -36,6 +36,9 @@ except Exception:
         return value
 
 os.environ['OPENAI_API_KEY'] = secret('OPENAI_API_KEY', required=True)
+os.environ['CHINESE_DIARIZATION_BACKEND'] = os.getenv('CHINESE_DIARIZATION_BACKEND', 'pyannote')
+_diarization_secret = {'pyannote': 'PYANNOTE_DIARIZATION_COMMAND', '3d-speaker': 'THREE_D_SPEAKER_DIARIZATION_COMMAND'}[os.environ['CHINESE_DIARIZATION_BACKEND']]
+os.environ[_diarization_secret] = secret(_diarization_secret, required=True)
 os.environ['LIPSYNC_PROVIDER'] = 'wav2lip'
 os.environ['FACE_DETECTOR'] = 'opencv-haar'
 os.environ['MOUTH_LANDMARK_PROVIDER'] = 'mediapipe'
