@@ -142,8 +142,15 @@ def bangla_director_plan(segments):
         info['profile'] = _profile_from_hint(info.get('profile'), slots[char])
     return plan
 
-def natural_bangla_tts(text, out_path, voice, emotion, character_id=None, reference_audio=None):
-    synthesize_bangla(text, Path(out_path), profile=voice, character_id=character_id, reference_audio=reference_audio)
+def natural_bangla_tts(text, out_path, voice, emotion, character_id=None, reference_audio=None, acting_directive=None):
+    synthesize_bangla(
+        text,
+        Path(out_path),
+        profile=voice,
+        character_id=character_id,
+        reference_audio=reference_audio,
+        acting_directive=acting_directive,
+    )
 
 def quality_master_mix(background, dubbed, music, total, work):
     out = Path(work) / 'master.wav'
