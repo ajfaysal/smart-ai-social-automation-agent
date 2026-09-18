@@ -104,7 +104,7 @@ def _open_source_voice(text: str, out_path: Path, character_id: str, preferred_e
     if engine == "edge-neural":
         return None
     try:
-        run_command_engine(engine, text, out_path, reference, character_id)
+        run_command_engine(engine, text, out_path, reference, character_id, acting_directive=acting_directive)
         return engine
     except Exception:
         if require_reference:
