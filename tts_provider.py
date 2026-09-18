@@ -163,3 +163,20 @@ def synthesize_bangla(text: str, out_path: Path, profile: str = "", character_in
         validate_tts_artifact(out_path)
         return "piper-fallback"
     raise RuntimeError("No Bangla TTS provider is available.")
+
+
+def synthesize_reference_tts(text: str, out_path: Path, character_id: str, target_language: str, reference_audio: str | None = None, acting_directive: str | None = None, preferred_engine: str | None = None) -> str:
+    """Synthesize cross-lingual speech from a validated source-speaker reference."""
+    reference_voice_required_now = reference_voice_required()
+    if not reference_audio:
+        raise RuntimeError(f"Reference voice is required for {character_id} in {target_language}.")
+    qc = validate_reference_voice(Path(reference_audio))
+    if qc.status != "SUCCEEDED":
+        raise RuntimeError(f"Reference voice QC failed for {character_id}.")
+    reference_dir = Path(reference_audio).parent
+    engine, reference = choose_engine(character_id, preferred=preferred_engine, reference_dir=reference_dir, require_reference=True)
+    if reference is None:
+        reference = Path(reference_audio)
+    run_command_engine(engine, text, out_path, reference, character_id, acting_directive=acting_directive, target_language=target_language)
+    validate_tts_artifact(out_path)
+    return engine
