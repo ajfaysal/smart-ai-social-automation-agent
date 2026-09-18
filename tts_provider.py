@@ -86,7 +86,7 @@ def _reference_voice_available() -> bool:
     return bool(os.getenv("BANGLA_REFERENCE_TTS_COMMAND"))
 
 
-def _reference_speak(text: str, out_path: Path, character_id: str, reference_audio: str | None = None) -> None:
+def _reference_speak(text: str, out_path: Path, character_id: str, reference_audio: str | None = None, acting_directive: str | None = None) -> None:
     command = os.getenv("BANGLA_REFERENCE_TTS_COMMAND", "")
     reference_dir = Path(os.getenv("BANGLA_REFERENCE_VOICE_DIR", ""))
     reference = Path(reference_audio) if reference_audio else reference_dir / f"{character_id}.wav"
@@ -94,10 +94,10 @@ def _reference_speak(text: str, out_path: Path, character_id: str, reference_aud
         raise RuntimeError("Reference Bangla TTS command is not configured.")
     if not reference.exists():
         raise RuntimeError(f"Missing reference voice for {character_id}: {reference}")
-    subprocess.run(command.format(text=text, output=str(out_path), reference=str(reference), character=character_id), shell=True, check=True)
+    subprocess.run(command.format(text=text, output=str(out_path), reference=str(reference), character=character_id, acting_directive=acting_directive or ""), shell=True, check=True)
 
 
-def _open_source_voice(text: str, out_path: Path, character_id: str, preferred_engine: str | None, require_reference: bool = False) -> str | None:
+def _open_source_voice(text: str, out_path: Path, character_id: str, preferred_engine: str | None, require_reference: bool = False, acting_directive: str | None = None) -> str | None:
     reference_dir_raw = os.getenv("BANGLA_REFERENCE_VOICE_DIR", "").strip()
     reference_dir = Path(reference_dir_raw) if reference_dir_raw else None
     engine, reference = choose_engine(character_id, preferred=preferred_engine, reference_dir=reference_dir, require_reference=require_reference)
