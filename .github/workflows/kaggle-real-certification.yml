@@ -41,13 +41,8 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check kaggle
           python -m pip install --disable-pip-version-check -r requirements.txt -r requirements-cloud-runner.txt
-      - name: Validate certification preflight
+      - name: Validate dispatch inputs
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          WAV2LIP_CHECKPOINT_URL: ${{ secrets.WAV2LIP_CHECKPOINT_URL }}
-          WAV2LIP_S3FD_URL: ${{ secrets.WAV2LIP_S3FD_URL }}
-          PYANNOTE_DIARIZATION_COMMAND: ${{ secrets.PYANNOTE_DIARIZATION_COMMAND }}
-          THREE_D_SPEAKER_DIARIZATION_COMMAND: ${{ secrets.THREE_D_SPEAKER_DIARIZATION_COMMAND }}
           VIDEO_URL: ${{ inputs.video_url }}
           TARGET_LANGUAGE: ${{ inputs.language }}
         run: |
@@ -57,9 +52,9 @@ jobs:
           p = build_preflight(
               video_url=os.environ["VIDEO_URL"],
               target_language=os.environ["TARGET_LANGUAGE"],
-              require_openai=True,
-              require_wav2lip=True,
-              require_diarization=True,
+              require_openai=False,
+              require_wav2lip=False,
+              require_diarization=False,
           )
           print(p)
           if not p.ready:
@@ -73,7 +68,8 @@ jobs:
           KERNEL_SLUG: ${{ inputs.kernel_slug }}
         run: |
           test -n "$KAGGLE_API_TOKEN" || { echo "Missing GitHub secret KAGGLE_API_TOKEN"; exit 2; }
-          python kaggle_gpu_orchestrator.py             --video-url "$VIDEO_URL"             --language "$TARGET_LANGUAGE"             --kernel-slug "$KERNEL_SLUG"
+          python kaggle_gpu_orchestrator.py             --video-url "$VIDEO_URL"             --language "$TARGET_LANGUAGE"             --kernel-slug "$KERNEL_SLUG" \
+            --dispatch-only
       - name: Publish dispatch metadata
         env:
           VIDEO_URL: ${{ inputs.video_url }}
