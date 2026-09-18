@@ -50,3 +50,21 @@ def test_bangla_make_tts_uses_reference_aware_provider(monkeypatch, tmp_path):
     drama_dubbing.make_tts("হ্যালো", out, "bn_c01_f_young", "sad", character_id="C01", reference_audio="/runtime/C01.wav", target_language="Bangla")
     assert calls["character_id"] == "C01"
     assert calls["reference_audio"] == "/runtime/C01.wav"
+
+
+def test_reference_tts_command_receives_acting_directive(monkeypatch, tmp_path):
+    import tts_provider
+    reference = tmp_path / "C01.wav"
+    reference.write_bytes(b"reference")
+    calls = {}
+    monkeypatch.setenv("BANGLA_REFERENCE_TTS_COMMAND", "echo {acting_directive} {character} {reference} {output}")
+    def fake_run(command, shell, check):
+        calls["command"] = command
+        calls["shell"] = shell
+        calls["check"] = check
+    monkeypatch.setattr(tts_provider.subprocess, "run", fake_run)
+    tts_provider._reference_speak("hello", tmp_path / "out.wav", "C01", str(reference), "sad, whispering")
+    assert "sad, whispering" in calls["command"]
+    assert "C01" in calls["command"]
+    assert calls["shell"] is True
+    assert calls["check"] is True
