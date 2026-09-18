@@ -94,7 +94,7 @@ def choose_engine(character_id: str, preferred: str | None = None, reference_dir
     return engine, reference
 
 
-def run_command_engine(engine: str, text: str, output: Path, reference: Path | None, character_id: str, acting_directive: str | None = None) -> None:
+def run_command_engine(engine: str, text: str, output: Path, reference: Path | None, character_id: str, acting_directive: str | None = None, target_language: str | None = None) -> None:
     """Run an external open-source TTS engine through a strict command template."""
     spec = VOICE_ENGINES[engine]
     command = os.getenv(spec.command_env, "")
@@ -108,6 +108,7 @@ def run_command_engine(engine: str, text: str, output: Path, reference: Path | N
         reference=str(reference or ""),
         character=character_id,
         acting_directive=acting_directive or "",
+        language=target_language or "",
     )
     subprocess.run(shlex.split(rendered), check=True, capture_output=True, text=True)
     if not output.exists() or output.stat().st_size == 0:
