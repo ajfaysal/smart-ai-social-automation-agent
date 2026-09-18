@@ -40,6 +40,13 @@ def certify(final_video: Path, manifest: dict[str, Any], *, source_language: str
     artifact = _probe(final_video)
     if (manifest.get("quality_control") or {}).get("status") != "pass":
         raise RuntimeError("certification failed: final QC is not pass")
+    if manifest.get("original_dialogue_in_final") is not False:
+        raise RuntimeError("certification failed: original dialogue is not proven removed")
+    if manifest.get("background_preserved") is not False:
+        raise RuntimeError("certification failed: original background audio is still preserved")
+    music = manifest.get("music") or {}
+    if music.get("enabled") is not False:
+        raise RuntimeError("certification failed: original/replacement music policy is not strict")
     if (manifest.get("lip_sync") or {}).get("applied") is not True:
         raise RuntimeError("certification failed: lip-sync was not actually applied")
     shots = manifest.get("shot_qc")
