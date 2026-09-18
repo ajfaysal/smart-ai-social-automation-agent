@@ -11,6 +11,8 @@ import json
 import os
 import shlex
 import subprocess
+
+from reference_voice_qc import validate_reference_voice
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
@@ -114,6 +116,11 @@ def extract_reference_clip(audio: Path, speaker_id: str, start: float, end: floa
     )
     if not output.exists() or output.stat().st_size == 0:
         raise RuntimeError(f"Reference extraction failed: {output}")
+    try:
+        validate_reference_voice(output, max_seconds=min(max_seconds if "max_seconds" in locals() else 8.0, 8.0))
+    except ValueError as exc:
+        output.unlink(missing_ok=True)
+        raise RuntimeError(f"Reference extraction failed QC for {safe}: {exc}") from exc
     return output
 
 

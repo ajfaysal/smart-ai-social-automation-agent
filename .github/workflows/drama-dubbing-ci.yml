@@ -14,10 +14,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install media test dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: Install test dependencies
         run: python -m pip install --disable-pip-version-check fastapi uvicorn python-multipart requests numpy opencv-python-headless pytest
       - name: Syntax check
-        run: python -m py_compile drama_dubbing.py music_engine.py lip_sync.py lip_sync_provider.py lip_sync_qc.py scene_analysis.py scene_aware_pipeline.py lip_sync_router.py face_detector.py face_validation.py face_tracking.py mouth_validation.py landmark_provider.py shot_lipsync.py shot_qc.py provider_runtime.py provider_reliability.py demucs_provider.py test_dubbing_integration.py test_provider_runtime.py test_provider_runtime_extra.py test_demucs_provider.py kaggle_full_pipeline.py kaggle_gpu_orchestrator.py v1_scope.py real_run_preflight.py speaker_identity.py chinese_speaker_pipeline.py voice_engine_registry.py tts_provider.py tests/test_kaggle_full_pipeline.py tests/test_character_voice_routing.py tests/character_voice_profile_contract.py tests/test_bangla_quality_pipeline.py tests/test_kaggle_gpu_orchestrator.py tests/test_v1_scope.py tests/test_real_run_preflight.py tests/test_speaker_identity.py tests/test_voice_engine_registry.py
+        run: python -m py_compile drama_dubbing.py music_engine.py lip_sync.py lip_sync_provider.py lip_sync_qc.py scene_analysis.py scene_aware_pipeline.py lip_sync_router.py face_detector.py face_validation.py face_tracking.py mouth_validation.py landmark_provider.py shot_lipsync.py shot_qc.py provider_runtime.py provider_reliability.py demucs_provider.py test_dubbing_integration.py test_provider_runtime.py test_provider_runtime_extra.py test_demucs_provider.py kaggle_full_pipeline.py kaggle_gpu_orchestrator.py v1_scope.py real_run_preflight.py speaker_identity.py chinese_speaker_pipeline.py voice_engine_registry.py tts_provider.py reference_voice_qc.py tests/test_reference_voice_qc.py tests/test_kaggle_full_pipeline.py tests/test_character_voice_routing.py tests/character_voice_profile_contract.py tests/test_bangla_quality_pipeline.py tests/test_kaggle_gpu_orchestrator.py tests/test_v1_scope.py tests/test_real_run_preflight.py tests/test_speaker_identity.py tests/test_voice_engine_registry.py
       - name: Import check
         run: |
           python - <<'PY'
@@ -26,7 +28,7 @@ jobs:
           import face_detector, face_validation, face_tracking, mouth_validation, landmark_provider
           import shot_lipsync, shot_qc, provider_runtime, provider_reliability, demucs_provider
           import kaggle_full_pipeline, kaggle_gpu_orchestrator, tts_provider, v1_scope, real_run_preflight
-          import speaker_identity, chinese_speaker_pipeline, voice_engine_registry
+          import speaker_identity, chinese_speaker_pipeline, voice_engine_registry, reference_voice_qc
           print('DubStudio modules import successfully')
           PY
       - name: Lip-sync and routing smoke tests
@@ -60,7 +62,7 @@ jobs:
       - name: Voice profile tests
         run: python -m pytest -q tests/test_character_voice_routing.py tests/character_voice_profile_contract.py tests/test_bangla_quality_pipeline.py tests/test_kaggle_gpu_orchestrator.py tests/test_v1_scope.py tests/test_real_run_preflight.py tests/test_voice_engine_registry.py
       - name: Chinese speaker identity tests
-        run: python -m pytest -q tests/test_speaker_identity.py
+        run: python -m pytest -q tests/test_speaker_identity.py tests/test_reference_voice_extraction.py tests/test_reference_voice_qc.py
       - name: Shot QC tests
         run: python test_shot_qc.py
       - name: End-to-end dubbing integration test
