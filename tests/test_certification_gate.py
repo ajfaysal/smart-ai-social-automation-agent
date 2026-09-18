@@ -9,7 +9,7 @@ def manifest(**overrides):
         "quality_control": {"status": "pass"},
         "lip_sync": {"applied": True},
         "shot_qc": {"status": "pass"},
-        "segments": [{"character": "C1", "voice": "nova", "timing_lock": True}],
+        "segments": [{"character": "C1", "voice": "nova", "reference_audio": "/runtime/C1.wav", "reference_qc": {"status": "SUCCEEDED"}, "reference_selection_score": [2.0, 0.9, -1.0], "timing_lock": True}],
         "provider_execution": {
             name: {"state": "succeeded", "applied": True}
             for name in gate.REQUIRED_PROVIDERS
@@ -52,3 +52,11 @@ def test_certification_rejects_non_chinese_source(monkeypatch, tmp_path, source)
     monkeypatch.setattr(gate, "_probe", lambda p: {"duration_seconds": 10.0, "streams": ["audio", "video"]})
     with pytest.raises(RuntimeError, match="source"):
         gate.certify(video, manifest(), source_language=source, target_language="Hindi")
+
+
+def test_certification_requires_reference_qc(monkeypatch, tmp_path):
+    video = tmp_path / "final.mp4"
+    video.write_bytes(b"real")
+    monkeypatch.setattr(gate, "_probe", lambda p: {"duration_seconds": 10.0, "streams": ["audio", "video"]})
+    with pytest.raises(RuntimeError, match="reference voice QC"):
+        gate.certify(video, manifest(segments=[{"character": "C1", "voice": "nova", "reference_audio": "/runtime/C1.wav", "reference_qc": {"status": "FAILED"}, "reference_selection_score": [2.0, 0.9, -1.0], "timing_lock": True}]), target_language="Bangla")
