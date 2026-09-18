@@ -10,6 +10,7 @@ from pathlib import Path
 from voice_engine_registry import choose_engine, reference_voice_required, run_command_engine
 from tts_artifact_qc import validate_tts_artifact
 from reference_voice_qc import validate_reference_voice
+from reference_voice_qc import validate_reference_voice
 
 BANGLA_BASE_VOICES = {
     "bd_female": "bn-BD-NabanitaNeural",
