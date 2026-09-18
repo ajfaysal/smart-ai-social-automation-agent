@@ -97,7 +97,7 @@ def write_identity_manifest(
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def extract_reference_clip(audio: Path, speaker_id: str, start: float, end: float, output_dir: Path) -> Path:
+def extract_reference_clip(audio: Path, speaker_id: str, start: float, end: float, output_dir: Path, *, max_seconds: float = 8.0) -> Path:
     """Extract a clean reference clip to runtime storage using ffmpeg."""
     if end <= start:
         raise ValueError("Reference clip end must be greater than start")
@@ -117,7 +117,7 @@ def extract_reference_clip(audio: Path, speaker_id: str, start: float, end: floa
     if not output.exists() or output.stat().st_size == 0:
         raise RuntimeError(f"Reference extraction failed: {output}")
     try:
-        validate_reference_voice(output, max_seconds=min(max_seconds if "max_seconds" in locals() else 8.0, 8.0))
+        validate_reference_voice(output, max_seconds=min(float(max_seconds), 8.0))
     except ValueError as exc:
         output.unlink(missing_ok=True)
         raise RuntimeError(f"Reference extraction failed QC for {safe}: {exc}") from exc
@@ -151,17 +151,7 @@ def run_diarization_command(audio: Path, backend: str, output_json: Path) -> Dia
 
 
 def _reference_score(audio: Path, turn: SpeakerTurn, *, max_seconds: float) -> tuple[float, float, float]:
-    """Score a turn by duration first, then by diarization confidence.
-
-    Duration is retained as the primary signal because longer speech usually gives
-    a cloning engine more phonetic coverage; confidence breaks ties deterministically.
-    """
-    duration = min(float(turn.end - turn.start), max_seconds)
-    return (duration, float(turn.confidence), -float(turn.start))
-
-
-def _reference_score(audio: Path, turn: SpeakerTurn, *, max_seconds: float) -> tuple[float, float, float]:
-    """Score a turn by duration first, then diarization confidence, deterministically."""
+    """Score a turn by duration, diarization confidence, then earliest start."""
     duration = min(float(turn.end - turn.start), max_seconds)
     return (duration, float(turn.confidence), -float(turn.start))
 
@@ -192,5 +182,5 @@ def extract_best_reference_clips(
     for sid, speaker_turns in candidates.items():
         best = max(speaker_turns, key=lambda t: _reference_score(audio, t, max_seconds=max_seconds))
         end = min(best.end, best.start + max_seconds)
-        references[sid] = extract_reference_clip(audio, sid, best.start, end, output_dir)
+        references[sid] = extract_reference_clip(audio, sid, best.start, end, output_dir, max_seconds=max_seconds)
     return references
