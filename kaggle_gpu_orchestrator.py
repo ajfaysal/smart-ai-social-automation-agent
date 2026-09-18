@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 
 from kaggle_full_pipeline import build_notebook
+from real_run_preflight import build_preflight
 
 DEFAULT_VIDEO_URL = "https://drive.google.com/file/d/1brOpsZOsoM2oWijxbYyHKDlDrsQTnO7-/view?usp=drivesdk"
 
@@ -35,6 +36,10 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
+    preflight = build_preflight(video_url=args.video_url, target_language=args.language)
+    if not preflight.ready:
+        print(json.dumps({"ready": False, "missing_secrets": preflight.missing_secrets, "missing_runtime": preflight.missing_runtime}, ensure_ascii=False))
+        return 2
     notebook = build_notebook(args.video_url, args.repo, args.ref, args.language)
     if args.dry_run:
         print(json.dumps(notebook, ensure_ascii=False, indent=2))
@@ -48,7 +53,7 @@ def main() -> int:
         )
         metadata = {
             "id": f"ajfaysal/{args.kernel_slug}",
-            "title": "Chinese Drama → Bangla Dubbing",
+            "title": f"Chinese Drama → {args.language} Dubbing",
             "code_file": "kaggle_full_pipeline.ipynb",
             "language": "python",
             "kernel_type": "notebook",
