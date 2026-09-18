@@ -1,43 +1,63 @@
-# 🚀 Serverless AI Social Automation Agent
+# AI Drama Dubbing & Social Automation Agent
 
-An automated, open-source AI agent powered by GitHub Actions and Playwright to automate trend research, content creation, and media publishing on X (Twitter). It supports custom API integrations so anyone can run their own personal social media manager completely free.
+Production-oriented, serverless tooling for AI-assisted Chinese drama dubbing and social automation.
 
----
+## Drama dubbing pipeline
 
-## ✨ Features
-- **Serverless Automation:** Runs entirely on GitHub Actions cron jobs. No paid hosting or local server required.
-- **Dynamic Content Generation:** Leverages advanced AI models via custom API endpoints for high-quality, targeted copywriting.
-- **Automated Media Integration:** Automatically generates contextual visual prompts and fetches beautiful graphics via Pollinations AI.
-- **Advanced Evasion Engine:** Built-in aggressive JavaScript injection and keyboard emulation to handle modern UI layouts and popup blockages smoothly.
+The production dubbing path is designed around an auditable, fail-closed workflow:
 
----
+1. Public video URL download and FFprobe validation
+2. OCR-guided on-screen Chinese text cleanup
+3. Audio extraction and Demucs vocal separation
+4. Speech-to-text with a canonical transcript/timeline
+5. Speaker diarization and speaker-to-character identity mapping
+6. Character-aware Bangla/English/Hindi voice routing
+7. Emotion and timing-aware TTS
+8. Replacement-dialogue-only audio mastering
+9. Shot-aware Wav2Lip lip-sync
+10. Final video assembly and QC
+11. Strict certification with provider execution evidence
 
-## 🛠️ Setup Guide for Public Users
+### V1 language scope
 
-Follow these simple steps to deploy your own personal version of this AI Agent in less than 5 minutes:
+- Source: Chinese (Simplified or Traditional)
+- Targets: Bangla, English, Hindi
+- Same-language Chinese revoice is technical testing only and is not V1 certification.
 
-### 1. Fork this Repository
-Click the **Fork** button at the top right of this page to create a copy of this repository under your own GitHub account.
+### Audio policy
 
-### 2. Prepare Your API Credentials
-You will need two things to power this agent:
-1. **AI API Key:** Get an API key from your preferred provider (supporting custom endpoints) to handle content generation.
-2. **X Cookies:** Log into X (Twitter) on your desktop browser, use a Cookie Editor extension, and export your cookies in **JSON format**.
+V1 removes the original dialogue and original music. Original SFX are not preserved by the replacement-dialogue-only mix. The generated provider manifest records this policy.
 
-### 3. Configure GitHub Secrets
-In your forked repository, go to **Settings > Secrets and variables > Actions** and click **New repository secret** to add the following variables:
+### Character voice routing
 
-| Secret Name | Description |
-| :--- | :--- |
-| `PREMIUM_API_KEY` | Your customized API Key for the language model. |
-| `X_COOKIES` | The complete JSON array string of your logged-in X session cookies. |
+Character identity is separated from the TTS provider. A character can be assigned a deterministic voice profile and optional reference audio. Bangla has a native Bengali voice profile pool and optional reference-voice runtime hooks. Provider-specific reference cloning is only considered successful when the configured runtime actually supports it.
 
-### 4. Enable GitHub Actions
-1. Go to the **Actions** tab in your repository.
-2. Click the green button that says **"I understand my workflows, go ahead and enable them"**.
-3. Select the **X Automation** workflow from the left sidebar.
-4. Click **Run workflow** to test your first automated post instantly!
+## Real GPU certification
 
----
-## 📜 License
-Distributed under the MIT License. Feel free to use, modify, and distribute.
+The real certification path runs on a private Kaggle GPU kernel. Provider credentials and model URLs stay in Kaggle Secrets; they are never committed to Git or duplicated into GitHub workflow variables.
+
+### Dispatch
+
+Use the GitHub Actions workflow: **Actions → Kaggle Real Certification Dispatch → Run workflow**.
+
+Inputs: `video_url`, `language` (Bangla/English/Hindi), and `kernel_slug`.
+
+The dispatch workflow does not require provider secrets in GitHub. It only validates the URL/language boundary and submits the Kaggle job.
+
+### Retrieval and certification
+
+Run `python kaggle_certification_operator.py <owner/kernel-slug> --timeout 3600 --poll 30` after the Kaggle kernel finishes.
+
+A run is accepted only when `certification.json` contains `certified=true` and the bundle includes the final MP4, matching dubbing manifest, `speaker-identity.json`, `speaker-routing.json`, and `text-cleanup.json`. The operator also records a SHA-256 digest of the final MP4.
+
+## Local development
+
+Use the existing CI workflow for repository tests. Real provider credentials, model checkpoints, media, and reference audio remain runtime-only.
+
+## Security
+
+Never commit API keys, access tokens, Kaggle credentials, model checkpoints, private reference audio, source media, or generated media. If a credential is exposed, revoke or rotate it immediately.
+
+## Social automation
+
+The repository also retains the original serverless social-automation components for X/Twitter workflows. Those components are separate from the production dubbing certification path.
