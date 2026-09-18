@@ -155,6 +155,7 @@ if __LANGUAGE__ == 'Bangla':
 
 output, mood, lip = drama_dubbing.dub_video(MUXED, __LANGUAGE__, requested_voice='auto', preserve_background=False, add_mood_music=False, lip_sync=True, speaker_routing=SPEAKER_ROUTES)
 manifest = output.with_suffix('.json')
+from real_run_certification import validate_certification, write_certification_report
 subtitle = output.with_suffix('.srt')
 for path in (output, manifest, subtitle):
     if path.exists(): shutil.copy2(path, ARTIFACTS / path.name)
@@ -182,8 +183,10 @@ report = {
     'source_text_cleanup': 'ocr-guided-easyocr-opencv-inpaint',
     'speaker_routing': 'diarized-speaker-to-character-to-voice-profile/reference-audio',
 }
-(ARTIFACTS / 'cloud-provider-certification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
-print(json.dumps(report, ensure_ascii=False, indent=2))
+report_path = ARTIFACTS / 'cloud-provider-certification.json'
+report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+write_certification_report(validate_certification(report_path), report_path)
+print(report_path.read_text(encoding='utf-8'))
 """
     source = source.replace("__REF__", repr(ref)).replace("__REPO__", repo).replace("__VIDEO_URL__", repr(video_url)).replace("__LANGUAGE__", repr(language))
     return {
