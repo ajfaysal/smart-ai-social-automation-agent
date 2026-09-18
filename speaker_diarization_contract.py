@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Iterable
 
+from reference_voice_qc import ReferenceVoiceQC
 from speaker_identity import CharacterIdentity, SpeakerTurn, normalize_speaker_id
 
 
@@ -13,6 +14,8 @@ class SpeakerVoiceRoute:
     character_id: str
     voice_profile: str | None
     reference_audio: str | None
+    reference_qc: ReferenceVoiceQC | None
+    reference_selection_score: tuple[float, float, float] | None
     confidence: float
 
 
@@ -22,7 +25,7 @@ def build_voice_routes(
     voice_profiles: dict[str, str] | None = None,
     minimum_confidence: float = 0.70,
 ) -> dict[str, SpeakerVoiceRoute]:
-    """Build a deterministic speaker->character->voice handoff without synthesizing audio."""
+    """Build a deterministic speaker->character->voice handoff with QC evidence."""
     voice_profiles = voice_profiles or {}
     active = {normalize_speaker_id(t.speaker_id) for t in turns}
     routes: dict[str, SpeakerVoiceRoute] = {}
@@ -35,6 +38,8 @@ def build_voice_routes(
             character_id=identity.character_id,
             voice_profile=voice_profiles.get(identity.character_id),
             reference_audio=identity.reference_audio,
+            reference_qc=identity.reference_qc,
+            reference_selection_score=identity.reference_selection_score,
             confidence=identity.confidence,
         )
     return routes
