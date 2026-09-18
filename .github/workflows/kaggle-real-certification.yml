@@ -80,13 +80,18 @@ jobs:
           python - <<'PY'
           import json, os
           from pathlib import Path
+
+          slug = os.environ["KERNEL_SLUG"]
+          kernel_ref = f"ajfaysal/{slug}"
           Path("validation-artifacts/kaggle-dispatch.json").write_text(
               json.dumps({
                   "status": "submitted",
                   "language": os.environ["TARGET_LANGUAGE"],
-                  "kernel_slug": os.environ["KERNEL_SLUG"],
+                  "kernel_slug": slug,
+                  "kernel_ref": kernel_ref,
                   "video_url": os.environ["VIDEO_URL"],
                   "certification_status": "pending_kaggle_execution",
+                  "retrieve_command": f"python kaggle_certification_operator.py {kernel_ref} --timeout 3600 --poll 30 --output-dir kaggle-certification-output",
                   "note": "Submission is not certification; certification.json is authoritative only after the Kaggle kernel completes.",
               }, indent=2),
               encoding="utf-8",
