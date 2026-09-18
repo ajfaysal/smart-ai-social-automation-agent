@@ -69,7 +69,7 @@ def test_end_to_end_dubbing_orchestration():
 
         def fake_attach(video, audio, out, total):
             assert video.exists() and audio.exists() and total == 4.0
-            out.write_bytes(b"final-video")
+            out.write_bytes(b"final-video" + b"x" * 2048)
 
         def fake_music(manifest, total, workdir):
             assert len(manifest) == 2 and total == 4.0
