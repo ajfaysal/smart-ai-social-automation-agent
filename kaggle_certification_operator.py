@@ -65,6 +65,29 @@ def download_output(kernel: str, output_dir: Path) -> None:
         raise RuntimeError((result.stdout + "\n" + result.stderr).strip())
 
 
+
+def validate_downloaded_artifacts(output_dir: Path) -> dict:
+    certification_files = list(output_dir.rglob("certification.json"))
+    if len(certification_files) != 1:
+        raise RuntimeError("Expected exactly one certification.json in Kaggle output")
+    data = json.loads(certification_files[0].read_text(encoding="utf-8"))
+    if data.get("certified") is not True:
+        raise RuntimeError(f"Kaggle run completed without certification: {data.get('reason', 'unknown reason')}")
+    videos = sorted(output_dir.rglob("*.mp4"))
+    if not videos:
+        raise RuntimeError("Certified output is missing final MP4 artifact")
+    required = {"speaker-identity.json", "speaker-routing.json", "text-cleanup.json"}
+    available = {p.name for p in output_dir.rglob("*") if p.is_file()}
+    missing = sorted(required - available)
+    if missing:
+        raise RuntimeError("Certified output is missing evidence artifacts: " + ", ".join(missing))
+    manifest = videos[0].with_suffix(".json")
+    if not manifest.is_file():
+        raise RuntimeError("Certified output is missing the final dubbing manifest beside the MP4")
+    import hashlib
+    digest = hashlib.sha256(videos[0].read_bytes()).hexdigest()
+    return {"certification": data, "final_video": str(videos[0]), "final_video_sha256": digest, "manifest": str(manifest), "evidence": sorted(required)}
+
 def read_certification(output_dir: Path) -> dict:
     matches = list(output_dir.rglob("certification.json"))
     if not matches:
@@ -95,8 +118,8 @@ def main() -> int:
 
     output_dir = Path(args.output_dir)
     download_output(args.kernel, output_dir)
-    certification = read_certification(output_dir)
-    print(json.dumps({"certified": True, "certification": certification}, ensure_ascii=False, indent=2))
+    evidence = validate_downloaded_artifacts(output_dir)
+    print(json.dumps({"certified": True, **evidence}, ensure_ascii=False, indent=2))
     return 0
 
 
