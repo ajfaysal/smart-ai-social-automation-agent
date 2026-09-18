@@ -86,7 +86,7 @@ def _reference_voice_available() -> bool:
     return bool(os.getenv("BANGLA_REFERENCE_TTS_COMMAND"))
 
 
-def _reference_speak(text: str, out_path: Path, character_id: str, reference_audio: str | None = None) -> None:
+def _reference_speak(text: str, out_path: Path, character_id: str, reference_audio: str | None = None, acting_directive: str | None = None) -> None:
     command = os.getenv("BANGLA_REFERENCE_TTS_COMMAND", "")
     reference_dir = Path(os.getenv("BANGLA_REFERENCE_VOICE_DIR", ""))
     reference = Path(reference_audio) if reference_audio else reference_dir / f"{character_id}.wav"
@@ -94,10 +94,10 @@ def _reference_speak(text: str, out_path: Path, character_id: str, reference_aud
         raise RuntimeError("Reference Bangla TTS command is not configured.")
     if not reference.exists():
         raise RuntimeError(f"Missing reference voice for {character_id}: {reference}")
-    subprocess.run(command.format(text=text, output=str(out_path), reference=str(reference), character=character_id), shell=True, check=True)
+    subprocess.run(command.format(text=text, output=str(out_path), reference=str(reference), character=character_id, acting_directive=acting_directive or ""), shell=True, check=True)
 
 
-def _open_source_voice(text: str, out_path: Path, character_id: str, preferred_engine: str | None, require_reference: bool = False) -> str | None:
+def _open_source_voice(text: str, out_path: Path, character_id: str, preferred_engine: str | None, require_reference: bool = False, acting_directive: str | None = None) -> str | None:
     reference_dir_raw = os.getenv("BANGLA_REFERENCE_VOICE_DIR", "").strip()
     reference_dir = Path(reference_dir_raw) if reference_dir_raw else None
     engine, reference = choose_engine(character_id, preferred=preferred_engine, reference_dir=reference_dir, require_reference=require_reference)
@@ -112,7 +112,7 @@ def _open_source_voice(text: str, out_path: Path, character_id: str, preferred_e
         return None
 
 
-def synthesize_bangla(text: str, out_path: Path, profile: str = "", character_index: int = 0, rate: str | None = None, pitch: str | None = None, character_id: str | None = None, preferred_engine: str | None = None, reference_audio: str | None = None) -> str:
+def synthesize_bangla(text: str, out_path: Path, profile: str = "", character_index: int = 0, rate: str | None = None, pitch: str | None = None, character_id: str | None = None, preferred_engine: str | None = None, reference_audio: str | None = None, acting_directive: str | None = None) -> str:
     """Use a multi-engine cascade for high-character-count Chinese dubbing.
 
     Reference-audio adapters are preferred; configured open-source engines can be
@@ -130,14 +130,14 @@ def synthesize_bangla(text: str, out_path: Path, profile: str = "", character_in
 
     if _reference_voice_available():
         try:
-            _reference_speak(text, out_path, character_id, reference_audio)
+            _reference_speak(text, out_path, character_id, reference_audio, acting_directive=acting_directive)
             validate_tts_artifact(out_path)
             return "reference-audio-bangla"
         except Exception:
             if require_reference:
                 raise
 
-    engine = _open_source_voice(text, out_path, character_id, preferred_engine, require_reference=require_reference)
+    engine = _open_source_voice(text, out_path, character_id, preferred_engine, require_reference=require_reference, acting_directive=acting_directive)
     if engine:
         return engine
     if require_reference:
