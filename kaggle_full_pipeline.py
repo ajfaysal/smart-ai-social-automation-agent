@@ -51,6 +51,38 @@ subprocess.run(['python', '-c', cleanup_code], cwd=REPO, check=True)
 MUXED = REPO / 'validation-input' / 'cleaned-with-audio.mp4'
 subprocess.run(['ffmpeg', '-y', '-i', str(CLEAN_VIDEO), '-i', str(INPUT), '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', str(MUXED)], check=True)
 
+# Speaker-aware Chinese dubbing: Demucs vocals -> diarization -> reference clips -> TTS routes.
+from demucs_provider import separate_vocals
+from chinese_dubbing_orchestrator import prepare_speaker_aware_dubbing
+from speaker_identity import run_diarization_command
+
+SOURCE_AUDIO = REPO / 'validation-input' / 'speaker-audio.wav'
+SPEAKER_MANIFEST = REPO / 'validation-artifacts' / 'speaker-identity.json'
+ROUTING_MANIFEST = REPO / 'validation-artifacts' / 'speaker-routing.json'
+REFERENCE_DIR = Path('/kaggle/working/reference-voices')
+REFERENCE_DIR.mkdir(parents=True, exist_ok=True)
+subprocess.run(['ffmpeg', '-y', '-i', str(INPUT), '-vn', '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le', str(SOURCE_AUDIO)], check=True)
+VOCALS = separate_vocals(SOURCE_AUDIO, Path('/kaggle/working/demucs-speaker'))
+from drama_dubbing import transcribe as _speaker_transcribe
+speaker_transcript = _speaker_transcribe(VOCALS)
+speaker_segments = []
+for item in speaker_transcript.get('segments', []):
+    start = float(item.get('start', 0)); end = float(item.get('end', 0)); text = str(item.get('text', '')).strip()
+    if end - start >= 0.05 and text:
+        speaker_segments.append((start, end, text))
+
+speaker_backend = os.getenv('CHINESE_DIARIZATION_BACKEND', 'pyannote')
+identity_payload = prepare_speaker_aware_dubbing(
+    VOCALS,
+    speaker_segments,
+    speaker_backend,
+    SPEAKER_MANIFEST,
+    REFERENCE_DIR,
+)
+ROUTED_SEGMENTS = identity_payload['segments']
+SPEAKER_ROUTES = {int(x['index']): x for x in ROUTED_SEGMENTS if x.get('routing_status') == 'SUCCEEDED'}
+ROUTING_MANIFEST.write_text(json.dumps(identity_payload, ensure_ascii=False, indent=2), encoding='utf-8')
+
 wav_repo = Path('/kaggle/working/Wav2Lip')
 subprocess.run(['git', 'clone', '--depth', '1', 'https://github.com/Rudrabha/Wav2Lip.git', str(wav_repo)], check=True)
 subprocess.run(['pip', 'install', '-r', 'requirements.txt'], cwd=wav_repo, check=True)
@@ -97,8 +129,8 @@ def bangla_director_plan(segments):
         info['profile'] = _profile_from_hint(info.get('profile'), slots[char])
     return plan
 
-def natural_bangla_tts(text, out_path, voice, emotion):
-    synthesize_bangla(text, Path(out_path), profile=voice)
+def natural_bangla_tts(text, out_path, voice, emotion, character_id=None, reference_audio=None):
+    synthesize_bangla(text, Path(out_path), profile=voice, character_id=character_id, reference_audio=reference_audio)
 
 def quality_master_mix(background, dubbed, music, total, work):
     out = Path(work) / 'master.wav'
@@ -111,19 +143,25 @@ if __LANGUAGE__ == 'Bangla':
     drama_dubbing.make_tts = natural_bangla_tts
     drama_dubbing.master_mix = quality_master_mix
 
-output, mood, lip = drama_dubbing.dub_video(MUXED, __LANGUAGE__, requested_voice='auto', preserve_background=False, add_mood_music=False, lip_sync=True)
+output, mood, lip = drama_dubbing.dub_video(MUXED, __LANGUAGE__, requested_voice='auto', preserve_background=False, add_mood_music=False, lip_sync=True, speaker_routing=SPEAKER_ROUTES)
 manifest = output.with_suffix('.json')
 subtitle = output.with_suffix('.srt')
 for path in (output, manifest, subtitle):
     if path.exists(): shutil.copy2(path, ARTIFACTS / path.name)
 if CLEAN_REPORT.exists(): shutil.copy2(CLEAN_REPORT, ARTIFACTS / CLEAN_REPORT.name)
+if SPEAKER_MANIFEST.exists(): shutil.copy2(SPEAKER_MANIFEST, ARTIFACTS / SPEAKER_MANIFEST.name)
+if ROUTING_MANIFEST.exists(): shutil.copy2(ROUTING_MANIFEST, ARTIFACTS / ROUTING_MANIFEST.name)
 
 report = {
-    'status': 'certified' if output.exists() and manifest.exists() and lip and lip.get('applied') else 'failed_closed',
+    'status': 'certified' if output.exists() and manifest.exists() and lip and lip.get('applied') and identity_payload['identity'].get('status') == 'SUCCEEDED' and SPEAKER_ROUTES else 'failed_closed',
     'output': str(ARTIFACTS / output.name),
     'manifest': str(ARTIFACTS / manifest.name),
     'subtitle': str(ARTIFACTS / subtitle.name),
     'text_cleanup_report': str(ARTIFACTS / CLEAN_REPORT.name),
+    'speaker_identity_manifest': str(ARTIFACTS / SPEAKER_MANIFEST.name),
+    'speaker_routing_manifest': str(ARTIFACTS / ROUTING_MANIFEST.name),
+    'speaker_identity_status': identity_payload['identity'].get('status'),
+    'speaker_count': identity_payload['identity'].get('speaker_count', 0),
     'mood': mood,
     'lip_sync': lip,
     'voice_engine': 'multi-engine-bangla' if __LANGUAGE__ == 'Bangla' else 'canonical-openai',
@@ -132,6 +170,7 @@ report = {
     'original_dialogue_removed': True,
     'original_music_removed': True,
     'source_text_cleanup': 'ocr-guided-easyocr-opencv-inpaint',
+    'speaker_routing': 'diarized-speaker-to-character-to-voice-profile/reference-audio',
 }
 (ARTIFACTS / 'cloud-provider-certification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
 print(json.dumps(report, ensure_ascii=False, indent=2))
