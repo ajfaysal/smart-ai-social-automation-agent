@@ -36,6 +36,11 @@ except Exception:
         return value
 
 os.environ['OPENAI_API_KEY'] = secret('OPENAI_API_KEY', required=True)
+os.environ['REQUIRE_REFERENCE_VOICE_CLONING'] = secret('REQUIRE_REFERENCE_VOICE_CLONING', required=True).strip().lower() or 'true'
+for _env in ('COSYVOICE_TTS_COMMAND','FISH_SPEECH_TTS_COMMAND','GPT_SOVITS_TTS_COMMAND','OPENVOICE_TTS_COMMAND'):
+    _value = secret(_env, required=False)
+    if _value:
+        os.environ[_env] = _value
 os.environ['CHINESE_DIARIZATION_BACKEND'] = os.getenv('CHINESE_DIARIZATION_BACKEND', 'pyannote')
 _diarization_secret = {'pyannote': 'PYANNOTE_DIARIZATION_COMMAND', '3d-speaker': 'THREE_D_SPEAKER_DIARIZATION_COMMAND'}[os.environ['CHINESE_DIARIZATION_BACKEND']]
 os.environ[_diarization_secret] = secret(_diarization_secret, required=True)
