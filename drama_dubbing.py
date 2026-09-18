@@ -75,8 +75,8 @@ def fit_audio_exact(src,out,target):
     if abs(duration(out)-target)>0.035: raise RuntimeError("Timing lock failed.")
 
 def _concat_file_line(path):
-    escaped=path.as_posix().replace(chr(39), chr(39)+chr(92)+chr(39)+chr(39))
-    return f"file '{escaped}'"
+    escaped=path.as_posix().replace("'", "'\"'\"'")
+    return "file '" + escaped + "'"
 
 def build_timeline(items,total,work):
     parts=[]; cursor=0.0
