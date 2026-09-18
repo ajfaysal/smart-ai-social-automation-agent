@@ -31,3 +31,18 @@ def test_3d_speaker_backend_requires_its_runtime_command(monkeypatch):
     result=build_preflight(video_url="https://example.com/drama.mp4",require_openai=False,require_wav2lip=False,diarization_backend="3d-speaker")
     assert not result.ready
     assert result.missing_runtime==("THREE_D_SPEAKER_DIARIZATION_COMMAND",)
+
+
+def test_kaggle_notebook_requires_selected_diarization_runtime_secret():
+    from kaggle_full_pipeline import build_notebook
+    notebook = build_notebook("https://example.com/drama.mp4", "ajfaysal/smart-ai-social-automation-agent", "main", "Bangla")
+    source = "".join(notebook["cells"][0]["source"])
+    assert "PYANNOTE_DIARIZATION_COMMAND" in source
+    assert "secret(_diarization_secret, required=True)" in source
+
+
+def test_kaggle_notebook_supports_3d_speaker_runtime_contract():
+    from kaggle_full_pipeline import build_notebook
+    notebook = build_notebook("https://example.com/drama.mp4", "ajfaysal/smart-ai-social-automation-agent", "main", "Hindi")
+    source = "".join(notebook["cells"][0]["source"])
+    assert "THREE_D_SPEAKER_DIARIZATION_COMMAND" in source
