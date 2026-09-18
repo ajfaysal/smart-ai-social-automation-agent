@@ -47,15 +47,13 @@ def director_plan(segments):
     r=api_request("POST","https://api.openai.com/v1/chat/completions",json={"model":os.getenv("DUBBING_DIRECTOR_MODEL",os.getenv("DUBBING_TRANSLATION_MODEL","gpt-4o-mini")),"temperature":0.1,"messages":[{"role":"system","content":system},{"role":"user","content":json.dumps(payload,ensure_ascii=False)}]})
     if not r.ok: raise RuntimeError(r.text)
     text=r.json()["choices"][0]["message"]["content"].strip()
-    if text.startswith("```"): text=text.split("
-",1)[1].rsplit("```",1)[0].strip()
+    if text.startswith("```"): text=text.split("\\n",1)[1].rsplit("```",1)[0].strip()
     try:data=json.loads(text)
     except json.JSONDecodeError:data=[]
     return {int(x["i"]):x for x in data if isinstance(x,dict) and "i" in x}
 
 def translate(text,target_language,max_seconds,emotion):
-    r=api_request("POST","https://api.openai.com/v1/chat/completions",json={"model":os.getenv("DUBBING_TRANSLATION_MODEL","gpt-4o-mini"),"temperature":0.15,"messages":[{"role":"system","content":"You are a professional audiovisual dubbing adapter. Preserve meaning, names, relationships and emotion. Timing is a hard constraint. Use the fewest natural spoken words needed to fit the exact window. Return only dialogue."},{"role":"user","content":f"Translate into {target_language}. Emotion: {emotion}. Exact spoken window: {max_seconds:.2f} seconds. Make it natural and concise:
-{text}"}]})
+    r=api_request("POST","https://api.openai.com/v1/chat/completions",json={"model":os.getenv("DUBBING_TRANSLATION_MODEL","gpt-4o-mini"),"temperature":0.15,"messages":[{"role":"system","content":"You are a professional audiovisual dubbing adapter. Preserve meaning, names, relationships and emotion. Timing is a hard constraint. Use the fewest natural spoken words needed to fit the exact window. Return only dialogue."},{"role":"user","content":f"Translate into {target_language}. Emotion: {emotion}. Exact spoken window: {max_seconds:.2f} seconds. Make it natural and concise:\\n{text}"}]})
     if not r.ok: raise RuntimeError(r.text)
     return r.json()["choices"][0]["message"]["content"].strip()
 
@@ -86,8 +84,7 @@ def build_timeline(items,total,work):
         parts.append(audio); cursor=max(cursor,end)
     if cursor<total-0.001:
         tail=work/"tail.wav"; run(["ffmpeg","-y","-f","lavfi","-i","anullsrc=r=48000:cl=stereo","-t",f"{total-cursor:.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(tail)]); parts.append(tail)
-    listing=work/"concat.txt"; listing.write_text("
-".join(_concat_file_line(p) for p in parts),encoding="utf-8"); return listing
+    listing=work/"concat.txt"; listing.write_text("\\n".join(_concat_file_line(p) for p in parts),encoding="utf-8"); return listing
 
 def separate_background(source_audio,work):
     separated=audited_demucs_separate(source_audio,work)
@@ -104,8 +101,7 @@ def build_mood_music(manifest,total,work):
         mood=str(x.get("emotion") or last).lower(); mood=mood if mood in valid else last; p=work/f"music_{i}.wav"; generate_mood_track(mood,max(.1,end-start),p); chunks.append(p); cursor=end; last=mood
     if cursor<total-.02:
         p=work/"music_tail.wav"; generate_mood_track(last,total-cursor,p); chunks.append(p)
-    listing=work/"music_concat.txt"; listing.write_text("
-".join(_concat_file_line(p) for p in chunks),encoding="utf-8"); out=work/"mood_music.wav"; run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(listing),"-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(out)]); return out,dominant
+    listing=work/"music_concat.txt"; listing.write_text("\\n".join(_concat_file_line(p) for p in chunks),encoding="utf-8"); out=work/"mood_music.wav"; run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(listing),"-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(out)]); return out,dominant
 
 def master_mix(background,dubbed,music,total,work):
     out=work/"master.wav"; inputs=[]; filters=[]
@@ -121,8 +117,7 @@ def attach_audio(video,audio,out,total): run(["ffmpeg","-y","-i",str(video),"-i"
 def write_srt(manifest,path):
     def stamp(v):
         ms=max(0,int(round(v*1000))); h,ms=divmod(ms,3600000); m,ms=divmod(ms,60000); s,ms=divmod(ms,1000); return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-    path.write_text("
-".join(sum(([str(i),f"{stamp(x['start'])} --> {stamp(x['end'])}",x["translation"],""] for i,x in enumerate(manifest,1)),[])),encoding="utf-8")
+    path.write_text("\\n".join(sum(([str(i),f"{stamp(x['start'])} --> {stamp(x['end'])}",x["translation"],""] for i,x in enumerate(manifest,1)),[])),encoding="utf-8")
 
 def dub_video(video_path,target_language,requested_voice="auto",preserve_background=True,add_mood_music=True,lip_sync=False,speaker_routing=None,provider_evidence=None):
     reset_provider_executions()
