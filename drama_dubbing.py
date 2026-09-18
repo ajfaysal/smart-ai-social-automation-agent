@@ -57,7 +57,7 @@ def translate(text,target_language,max_seconds,emotion):
     if not r.ok: raise RuntimeError(r.text)
     return r.json()["choices"][0]["message"]["content"].strip()
 
-def make_tts(text,out_path,voice,emotion):
+def make_tts(text,out_path,voice,emotion,character_id=None,reference_audio=None):
     r=api_request("POST","https://api.openai.com/v1/audio/speech",json={"model":os.getenv("DUBBING_TTS_MODEL","gpt-4o-mini-tts"),"voice":voice,"input":text,"instructions":f"Professional drama acting. Emotion: {emotion}. Natural conversational delivery. Match intensity to the scene. Do not add words or narration.","response_format":"mp3"})
     if not r.ok: raise RuntimeError(r.text)
     out_path.write_bytes(r.content)
@@ -115,7 +115,7 @@ def write_srt(manifest,path):
         ms=max(0,int(round(v*1000))); h,ms=divmod(ms,3600000); m,ms=divmod(ms,60000); s,ms=divmod(ms,1000); return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
     path.write_text("\n".join(sum(([str(i),f"{stamp(x['start'])} --> {stamp(x['end'])}",x['translation'],""] for i,x in enumerate(manifest,1)),[])),encoding="utf-8")
 
-def dub_video(video_path,target_language,requested_voice="auto",preserve_background=True,add_mood_music=True,lip_sync=False):
+def dub_video(video_path,target_language,requested_voice="auto",preserve_background=True,add_mood_music=True,lip_sync=False,speaker_routing=None):
     reset_provider_executions()
     work=Path(tempfile.mkdtemp(prefix="dubstudio_"))
     try:
@@ -129,14 +129,19 @@ def dub_video(video_path,target_language,requested_voice="auto",preserve_backgro
         for i,(start,end,text) in enumerate(segments):
             start=max(start,previous)
             if end<=start+.05: continue
-            info=plan.get(i,{"character":f"C{i+1}","profile":"neutral","emotion":"neutral"}); char=str(info.get("character") or f"C{i+1}"); emotion=str(info.get("emotion") or "neutral"); profile=str(info.get("profile") or "")
+            info=plan.get(i,{"character":f"C{i+1}","profile":"neutral","emotion":"neutral"})
+            route=(speaker_routing or {}).get(i) or {}
+            char=str(route.get("character_id") or info.get("character") or f"C{i+1}")
+            emotion=str(info.get("emotion") or "neutral")
+            profile=str(route.get("voice_profile") or info.get("profile") or "")
+            reference_audio=route.get("reference_audio")
             if char not in voices:
                 # The director's profile is authoritative when the selected
                 # provider supports it (Bangla profiles are handled by the
                 # Kaggle runner). Otherwise retain the generic voice pool.
                 voices[char] = profile if profile in VOICE_POOL else (requested_voice if requested_voice!="auto" else VOICE_POOL[len(voices)%len(VOICE_POOL)])
-            window=end-start; translated=translate(text,target_language,window,emotion); raw=work/f"tts_{i}.mp3"; fitted=work/f"fit_{i}.wav"; make_tts(translated,raw,voices[char],emotion); fit_audio_exact(raw,fitted,window); items.append((start,end,fitted)); previous=end
-            manifest.append({"index":i+1,"character":char,"profile":profile or "neutral","voice":voices[char],"emotion":emotion,"start":round(start,3),"end":round(end,3),"duration":round(window,3),"source":text,"translation":translated,"timing_lock":True,"drift_ms":0})
+            window=end-start; translated=translate(text,target_language,window,emotion); raw=work/f"tts_{i}.mp3"; fitted=work/f"fit_{i}.wav"; make_tts(translated,raw,voices[char],emotion,character_id=char,reference_audio=reference_audio); fit_audio_exact(raw,fitted,window); items.append((start,end,fitted)); previous=end
+            manifest.append({"index":i+1,"character":char,"profile":profile or "neutral","voice":voices[char],"reference_audio":reference_audio,"emotion":emotion,"start":round(start,3),"end":round(end,3),"duration":round(window,3),"source":text,"translation":translated,"timing_lock":True,"drift_ms":0})
         concat=build_timeline(items,total,work); dubbed=work/"dubbed.wav"; run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(concat),"-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(dubbed)])
         if abs(duration(dubbed)-total)>.05: raise RuntimeError("Final timing verification failed.")
         music,dominant=(build_mood_music(manifest,total,work) if add_mood_music else (None,"neutral")); final_audio=master_mix(background,dubbed,music,total,work)
