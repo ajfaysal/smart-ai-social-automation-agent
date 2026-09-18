@@ -9,6 +9,8 @@ from pathlib import Path
 
 from voice_engine_registry import choose_engine, reference_voice_required, run_command_engine
 from tts_artifact_qc import validate_tts_artifact
+from reference_voice_qc import validate_reference_voice
+from reference_voice_qc import validate_reference_voice
 
 BANGLA_BASE_VOICES = {
     "bd_female": "bn-BD-NabanitaNeural",
@@ -120,6 +122,11 @@ def synthesize_bangla(text: str, out_path: Path, profile: str = "", character_in
     out_path.parent.mkdir(parents=True, exist_ok=True)
     character_id = character_id or profile or f"character_{character_index + 1:02d}"
     require_reference = reference_voice_required()
+    validated_reference = None
+    if reference_audio:
+        validated_reference = validate_reference_voice(Path(reference_audio))
+        if validated_reference.status != "SUCCEEDED":
+            raise RuntimeError(f"Reference voice QC failed for {character_id}.")
 
     if _reference_voice_available():
         try:

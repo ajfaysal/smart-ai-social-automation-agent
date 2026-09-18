@@ -15,3 +15,16 @@ def test_reference_score_caps_duration():
 def test_reference_qc_evidence_helper_exposes_selection_and_qc():
     import speaker_identity
     assert hasattr(speaker_identity, "extract_best_reference_clips_with_qc")
+
+
+def test_tts_rejects_invalid_reference_before_provider_call(tmp_path, monkeypatch):
+    import tts_provider
+    p = tmp_path / "bad.wav"
+    import wave
+    with wave.open(str(p), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(b"\\x00\\x10" * 8000)
+    monkeypatch.setattr(tts_provider, "_reference_voice_available", lambda: True)
+    monkeypatch.setenv("BANGLA_REFERENCE_TTS_COMMAND", "should-not-run")
+    import pytest
+    with pytest.raises(ValueError, match="too short"):
+        tts_provider.synthesize_bangla("hello", tmp_path / "out.wav", character_id="C01", reference_audio=str(p))
