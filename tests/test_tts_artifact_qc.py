@@ -38,3 +38,15 @@ def test_rejects_too_short_audio(tmp_path):
     _wav(p, frames=100)
     with pytest.raises(RuntimeError, match="invalid audio/duration"):
         validate_tts_artifact(p, min_duration_seconds=0.05)
+
+
+def test_bangla_make_tts_uses_reference_aware_provider(monkeypatch, tmp_path):
+    import drama_dubbing
+    calls = {}
+    def fake_synthesize(text, out_path, **kwargs):
+        calls.update(kwargs)
+    monkeypatch.setattr("tts_provider.synthesize_bangla", fake_synthesize)
+    out = tmp_path / "voice.wav"
+    drama_dubbing.make_tts("হ্যালো", out, "bn_c01_f_young", "sad", character_id="C01", reference_audio="/runtime/C01.wav", target_language="Bangla")
+    assert calls["character_id"] == "C01"
+    assert calls["reference_audio"] == "/runtime/C01.wav"
