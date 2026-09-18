@@ -84,7 +84,6 @@ SPEAKER_ROUTES = {int(x['index']): x for x in ROUTED_SEGMENTS if x.get('routing_
 # Reuse the exact transcript that was timestamp-routed above. This prevents a second
 # transcription pass from producing different segment indices and breaking speaker routes.
 _canonical_segments = tuple(speaker_segments)
-_original_transcribe = drama_dubbing.transcribe if 'drama_dubbing' in globals() else None
 # drama_dubbing is imported below; install the override immediately after that import.
 ROUTING_MANIFEST.write_text(json.dumps(identity_payload, ensure_ascii=False, indent=2), encoding='utf-8')
 
