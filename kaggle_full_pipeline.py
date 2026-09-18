@@ -165,8 +165,26 @@ if CLEAN_REPORT.exists(): shutil.copy2(CLEAN_REPORT, ARTIFACTS / CLEAN_REPORT.na
 if SPEAKER_MANIFEST.exists(): shutil.copy2(SPEAKER_MANIFEST, ARTIFACTS / SPEAKER_MANIFEST.name)
 if ROUTING_MANIFEST.exists(): shutil.copy2(ROUTING_MANIFEST, ARTIFACTS / ROUTING_MANIFEST.name)
 
+from certification_gate import certify_manifest_file
+certification_path = ARTIFACTS / 'certification.json'
+try:
+    certification = certify_manifest_file(
+        output,
+        manifest,
+        source_language='Chinese (Simplified)',
+        target_language=__LANGUAGE__,
+    )
+except Exception as exc:
+    certification = {
+        'certified': False,
+        'reason': str(exc),
+        'artifact': str(output),
+    }
+certification_path.write_text(json.dumps(certification, ensure_ascii=False, indent=2), encoding='utf-8')
+
 report = {
-    'status': 'certified' if output.exists() and manifest.exists() and lip and lip.get('applied') and identity_payload['identity'].get('status') == 'SUCCEEDED' and SPEAKER_ROUTES else 'failed_closed',
+    'status': 'certified' if certification.get('certified') is True else 'failed_closed',
+    'certification': certification,
     'output': str(ARTIFACTS / output.name),
     'manifest': str(ARTIFACTS / manifest.name),
     'subtitle': str(ARTIFACTS / subtitle.name),
