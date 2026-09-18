@@ -141,3 +141,33 @@ def run_diarization_command(audio: Path, backend: str, output_json: Path) -> Dia
         return DiarizationResult(backend, "SUCCEEDED", turns, len(speakers))
     except Exception as exc:
         return DiarizationResult(backend, "FAILED", tuple(), 0, str(exc))
+
+
+def extract_best_reference_clips(
+    audio: Path,
+    turns: Iterable[SpeakerTurn],
+    output_dir: Path,
+    *,
+    min_seconds: float = 1.5,
+    max_seconds: float = 8.0,
+) -> dict[str, Path]:
+    """Extract the longest clean-enough turn per speaker as a runtime voice reference.
+
+    The source audio is expected to contain isolated speaker turns (normally the
+    Demucs vocal stem). Samples stay in runtime storage and are never committed.
+    """
+    candidates: dict[str, list[SpeakerTurn]] = {}
+    for turn in turns:
+        if turn.end <= turn.start:
+            continue
+        duration = min(float(turn.end - turn.start), max_seconds)
+        if duration >= min_seconds:
+            sid = normalize_speaker_id(turn.speaker_id)
+            candidates.setdefault(sid, []).append(turn)
+
+    references: dict[str, Path] = {}
+    for sid, speaker_turns in candidates.items():
+        best = max(speaker_turns, key=lambda t: (t.end - t.start, -t.start))
+        end = min(best.end, best.start + max_seconds)
+        references[sid] = extract_reference_clip(audio, sid, best.start, end, output_dir)
+    return references
