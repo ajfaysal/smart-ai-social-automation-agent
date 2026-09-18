@@ -11,7 +11,7 @@ def _write_certified_output(root: Path, output_name: str = "final.mp4") -> None:
         json.dumps({"certified": True}), encoding="utf-8"
     )
     (root / "cloud-provider-certification.json").write_text(
-        json.dumps({"status": "certified", "output": f"/kaggle/working/final-artifacts/{output_name}"}),
+        json.dumps({"status": "certified", "output": f"/kaggle/working/final-artifacts/{output_name}", "output_sha256": "9b1e9c2d4a8e7f6b5c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1", "manifest_filename": f"{Path(output_name).stem}.json"}),
         encoding="utf-8",
     )
     (root / output_name).write_bytes(b"video")
@@ -47,6 +47,15 @@ def test_validate_rejects_missing_evidence(tmp_path):
     _write_certified_output(tmp_path)
     (tmp_path / "speaker-routing.json").unlink()
     with pytest.raises(RuntimeError, match="evidence artifacts"):
+        validate_downloaded_artifacts(tmp_path)
+
+
+def test_validate_rejects_sha_mismatch(tmp_path):
+    _write_certified_output(tmp_path)
+    report = json.loads((tmp_path / 'cloud-provider-certification.json').read_text())
+    report['output_sha256'] = '0' * 64
+    (tmp_path / 'cloud-provider-certification.json').write_text(json.dumps(report))
+    with pytest.raises(RuntimeError, match='SHA-256'):
         validate_downloaded_artifacts(tmp_path)
 
 
