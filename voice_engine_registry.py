@@ -56,17 +56,42 @@ def _reference_exists(reference_dir: Path | None, character_id: str) -> Path | N
     return None
 
 
-def choose_engine(character_id: str, preferred: str | None = None, reference_dir: Path | None = None) -> tuple[str, Path | None]:
-    """Choose a configured engine while keeping a stable engine per character."""
+def reference_voice_required() -> bool:
+    """Return whether the active run must preserve source-speaker identity."""
+    return os.getenv("REQUIRE_REFERENCE_VOICE_CLONING", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def engine_capability(engine: str) -> dict[str, bool | str]:
+    """Expose auditable capabilities for manifests and certification."""
+    spec = VOICE_ENGINES[engine]
+    return {
+        "engine": spec.name,
+        "supports_cross_lingual": spec.supports_cross_lingual,
+        "supports_reference_voice": spec.supports_reference_voice,
+        "reference_voice_required": spec.supports_reference_voice,
+    }
+
+
+def choose_engine(character_id: str, preferred: str | None = None, reference_dir: Path | None = None, require_reference: bool = False) -> tuple[str, Path | None]:
+    """Choose a stable engine; fail closed when reference cloning is required."""
     configured = [x for x in available_engines() if x != "edge-neural"]
+    if require_reference:
+        configured = [x for x in configured if VOICE_ENGINES[x].supports_reference_voice]
+        if not configured:
+            raise RuntimeError("Reference voice cloning is required but no configured reference-capable engine is available.")
     if preferred in configured:
-        return preferred, _reference_exists(reference_dir, character_id)
-    if configured:
-        # Stable per-character sharding avoids putting every character on one model.
+        engine = preferred
+    elif configured:
         index = sum(ord(c) for c in character_id) % len(configured)
         engine = configured[index]
-        return engine, _reference_exists(reference_dir, character_id)
-    return "edge-neural", None
+    elif require_reference:
+        raise RuntimeError(f"Reference voice cloning is required for {character_id}, but no engine is configured.")
+    else:
+        return "edge-neural", None
+    reference = _reference_exists(reference_dir, character_id)
+    if require_reference and reference is None:
+        raise RuntimeError(f"Reference voice cloning is required for {character_id}, but no reference audio is available.")
+    return engine, reference
 
 
 def run_command_engine(engine: str, text: str, output: Path, reference: Path | None, character_id: str) -> None:

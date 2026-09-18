@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from voice_engine_registry import choose_engine, run_command_engine
+from voice_engine_registry import choose_engine, reference_voice_required, run_command_engine
 from tts_artifact_qc import validate_tts_artifact
 
 BANGLA_BASE_VOICES = {
@@ -95,16 +95,18 @@ def _reference_speak(text: str, out_path: Path, character_id: str, reference_aud
     subprocess.run(command.format(text=text, output=str(out_path), reference=str(reference), character=character_id), shell=True, check=True)
 
 
-def _open_source_voice(text: str, out_path: Path, character_id: str, preferred_engine: str | None) -> str | None:
+def _open_source_voice(text: str, out_path: Path, character_id: str, preferred_engine: str | None, require_reference: bool = False) -> str | None:
     reference_dir_raw = os.getenv("BANGLA_REFERENCE_VOICE_DIR", "").strip()
     reference_dir = Path(reference_dir_raw) if reference_dir_raw else None
-    engine, reference = choose_engine(character_id, preferred=preferred_engine, reference_dir=reference_dir)
-    if engine == "edge-neural" or reference is None:
+    engine, reference = choose_engine(character_id, preferred=preferred_engine, reference_dir=reference_dir, require_reference=require_reference)
+    if engine == "edge-neural":
         return None
     try:
         run_command_engine(engine, text, out_path, reference, character_id)
         return engine
     except Exception:
+        if require_reference:
+            raise
         return None
 
 
@@ -117,6 +119,7 @@ def synthesize_bangla(text: str, out_path: Path, profile: str = "", character_in
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     character_id = character_id or profile or f"character_{character_index + 1:02d}"
+    require_reference = reference_voice_required()
 
     if _reference_voice_available():
         try:
@@ -124,11 +127,14 @@ def synthesize_bangla(text: str, out_path: Path, profile: str = "", character_in
             validate_tts_artifact(out_path)
             return "reference-audio-bangla"
         except Exception:
-            pass
+            if require_reference:
+                raise
 
-    engine = _open_source_voice(text, out_path, character_id, preferred_engine)
+    engine = _open_source_voice(text, out_path, character_id, preferred_engine, require_reference=require_reference)
     if engine:
         return engine
+    if require_reference:
+        raise RuntimeError(f"Reference voice cloning is required for {character_id}; refusing Edge/Piper fallback.")
 
     voice, pr, pp = bangla_profile_settings(profile, character_index)
     rate = pr if rate is None else rate
