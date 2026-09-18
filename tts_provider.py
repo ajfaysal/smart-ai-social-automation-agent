@@ -10,6 +10,8 @@ from pathlib import Path
 from voice_engine_registry import choose_engine, reference_voice_required, run_command_engine
 from tts_artifact_qc import validate_tts_artifact
 from reference_voice_qc import validate_reference_voice
+from provider_runtime import finalize
+from voice_engine_registry import engine_capability
 
 BANGLA_BASE_VOICES = {
     "bd_female": "bn-BD-NabanitaNeural",
@@ -131,8 +133,10 @@ def synthesize_bangla(text: str, out_path: Path, profile: str = "", character_in
         try:
             _reference_speak(text, out_path, character_id, reference_audio, acting_directive=acting_directive)
             validate_tts_artifact(out_path)
+            finalize("reference-audio-bangla", configured=True, attempted=True, artifact=out_path, min_bytes=1, capabilities=["reference_voice", "cross_lingual"])
             return "reference-audio-bangla"
-        except Exception:
+        except Exception as exc:
+            finalize("reference-audio-bangla", configured=True, attempted=True, reason=str(exc), capabilities=["reference_voice", "cross_lingual"])
             if require_reference:
                 raise
 
@@ -175,6 +179,11 @@ def synthesize_reference_tts(text: str, out_path: Path, character_id: str, targe
     reference_dir = Path(reference_audio).parent
     engine, _ = choose_engine(character_id, preferred=preferred_engine, reference_dir=reference_dir, require_reference=True)
     reference = Path(reference_audio)
-    run_command_engine(engine, text, out_path, reference, character_id, acting_directive=acting_directive, target_language=target_language)
-    validate_tts_artifact(out_path)
+    try:
+        run_command_engine(engine, text, out_path, reference, character_id, acting_directive=acting_directive, target_language=target_language)
+        validate_tts_artifact(out_path)
+    except Exception as exc:
+        finalize(engine, configured=True, attempted=True, reason=str(exc), capabilities=["reference_voice", "cross_lingual"])
+        raise
+    finalize(engine, configured=True, attempted=True, artifact=out_path, min_bytes=1, capabilities=["reference_voice", "cross_lingual"])
     return engine
