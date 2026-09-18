@@ -73,29 +73,31 @@ def validate_downloaded_artifacts(output_dir: Path) -> dict:
     data = json.loads(certification_files[0].read_text(encoding="utf-8"))
     if data.get("certified") is not True:
         raise RuntimeError(f"Kaggle run completed without certification: {data.get('reason', 'unknown reason')}")
-    videos = sorted(output_dir.rglob("*.mp4"))
-    if not videos:
-        raise RuntimeError("Certified output is missing final MP4 artifact")
+    report_files = list(output_dir.rglob("cloud-provider-certification.json"))
+    if len(report_files) != 1:
+        raise RuntimeError("Expected exactly one cloud-provider-certification.json in Kaggle output")
+    report = json.loads(report_files[0].read_text(encoding="utf-8"))
+    if report.get("status") != "certified":
+        raise RuntimeError("Kaggle output report is not certified")
+    reported_output = str(report.get("output", "")).strip()
+    if not reported_output:
+        raise RuntimeError("Kaggle output report does not identify the final video")
+    final_name = Path(reported_output).name
+    videos = [p for p in output_dir.rglob("*.mp4") if p.name == final_name]
+    if len(videos) != 1:
+        raise RuntimeError("Expected exactly one MP4 matching the certified final output")
+    final_video = videos[0]
     required = {"speaker-identity.json", "speaker-routing.json", "text-cleanup.json"}
     available = {p.name for p in output_dir.rglob("*") if p.is_file()}
     missing = sorted(required - available)
     if missing:
         raise RuntimeError("Certified output is missing evidence artifacts: " + ", ".join(missing))
-    manifest = videos[0].with_suffix(".json")
+    manifest = final_video.with_suffix(".json")
     if not manifest.is_file():
         raise RuntimeError("Certified output is missing the final dubbing manifest beside the MP4")
     import hashlib
-    digest = hashlib.sha256(videos[0].read_bytes()).hexdigest()
-    return {"certification": data, "final_video": str(videos[0]), "final_video_sha256": digest, "manifest": str(manifest), "evidence": sorted(required)}
-
-def read_certification(output_dir: Path) -> dict:
-    matches = list(output_dir.rglob("certification.json"))
-    if not matches:
-        raise RuntimeError("certification.json was not produced by the Kaggle kernel")
-    data = json.loads(matches[0].read_text(encoding="utf-8"))
-    if data.get("certified") is not True:
-        raise RuntimeError(f"Kaggle run completed without certification: {data.get('reason', 'unknown reason')}")
-    return data
+    digest = hashlib.sha256(final_video.read_bytes()).hexdigest()
+    return {"certification": data, "final_video": str(final_video), "final_video_sha256": digest, "manifest": str(manifest), "evidence": sorted(required), "cloud_report": str(report_files[0])}
 
 
 def main() -> int:
