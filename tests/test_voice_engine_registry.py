@@ -29,3 +29,28 @@ def test_unconfigured_registry_is_credential_free(monkeypatch):
     for key in ("COSYVOICE_TTS_COMMAND", "FISH_SPEECH_TTS_COMMAND", "GPT_SOVITS_TTS_COMMAND", "OPENVOICE_TTS_COMMAND"):
         monkeypatch.delenv(key, raising=False)
     assert available_engines() == ["edge-neural"]
+
+
+def test_command_engine_renders_acting_directive(monkeypatch, tmp_path: Path):
+    import voice_engine_registry
+    output = tmp_path / "out.wav"
+    reference = tmp_path / "ref.wav"
+    reference.write_bytes(b"reference")
+    calls = {}
+    monkeypatch.setenv(
+        "FISH_SPEECH_TTS_COMMAND",
+        'fish --text {text} --output {output} --reference {reference} --acting "{acting_directive}"',
+    )
+
+    def fake_run(args, check, capture_output, text):
+        calls["args"] = args
+        calls["check"] = check
+
+    monkeypatch.setattr(voice_engine_registry.subprocess, "run", fake_run)
+    output.write_bytes(b"audio")
+    voice_engine_registry.run_command_engine(
+        "fish-speech", "hello", output, reference, "C1", "sad, whispering"
+    )
+    assert "--acting" in calls["args"]
+    assert calls["args"][calls["args"].index("--acting") + 1] == "sad, whispering"
+    assert calls["check"] is True

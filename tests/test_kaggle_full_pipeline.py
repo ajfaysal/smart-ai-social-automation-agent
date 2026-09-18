@@ -37,6 +37,8 @@ def test_bangla_notebook_uses_neural_multicharacter_voice_pool_and_replacement_m
     assert "edge-tts" in source
     assert "synthesize_bangla" in source
     assert "natural_bangla_tts" in source
+    assert "acting_directive=None" in source
+    assert "acting_directive=acting_directive" in source
     assert "replacement-dialogue-only-no-original-music" in source
     assert "BANGLA_CHARACTER_VOICE_POOL" in source
     assert source.count("bn_c") >= 10
