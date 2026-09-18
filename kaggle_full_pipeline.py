@@ -182,10 +182,14 @@ except Exception as exc:
     }
 certification_path.write_text(json.dumps(certification, ensure_ascii=False, indent=2), encoding='utf-8')
 
+import hashlib
+final_video_sha256 = hashlib.sha256(output.read_bytes()).hexdigest()
 report = {
     'status': 'certified' if certification.get('certified') is True else 'failed_closed',
     'certification': certification,
     'output': str(ARTIFACTS / output.name),
+    'output_sha256': final_video_sha256,
+    'manifest_filename': manifest.name,
     'manifest': str(ARTIFACTS / manifest.name),
     'subtitle': str(ARTIFACTS / subtitle.name),
     'text_cleanup_report': str(ARTIFACTS / CLEAN_REPORT.name),
