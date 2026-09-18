@@ -36,6 +36,18 @@ except Exception:
         return value
 
 os.environ['OPENAI_API_KEY'] = secret('OPENAI_API_KEY', required=True)
+# Real-run prerequisites are checked inside the GPU runtime, where provider
+# commands/secrets actually exist. Nothing sensitive is persisted to git.
+os.environ['WAV2LIP_CHECKPOINT_URL'] = secret('WAV2LIP_CHECKPOINT_URL', required=True)
+os.environ['WAV2LIP_S3FD_URL'] = secret('WAV2LIP_S3FD_URL', required=True)
+speaker_backend = os.getenv('CHINESE_DIARIZATION_BACKEND', 'pyannote')
+_diar_secret = 'PYANNOTE_DIARIZATION_COMMAND' if speaker_backend == 'pyannote' else 'THREE_D_SPEAKER_DIARIZATION_COMMAND'
+os.environ[_diar_secret] = secret(_diar_secret, required=True)
+from real_run_preflight import build_preflight
+_preflight = build_preflight(video_url=__VIDEO_URL__, target_language=__LANGUAGE__, diarization_backend=speaker_backend)
+if not _preflight.ready:
+    raise RuntimeError(json.dumps({'status':'failed_closed','missing_secrets':_preflight.missing_secrets,'missing_runtime':_preflight.missing_runtime}))
+print(json.dumps({'status':'preflight_ready','target_language':_preflight.selection.target_language,'diarization_backend':speaker_backend}))
 os.environ['LIPSYNC_PROVIDER'] = 'wav2lip'
 os.environ['FACE_DETECTOR'] = 'opencv-haar'
 os.environ['MOUTH_LANDMARK_PROVIDER'] = 'mediapipe'
@@ -90,8 +102,8 @@ ROUTING_MANIFEST.write_text(json.dumps(identity_payload, ensure_ascii=False, ind
 wav_repo = Path('/kaggle/working/Wav2Lip')
 subprocess.run(['git', 'clone', '--depth', '1', 'https://github.com/Rudrabha/Wav2Lip.git', str(wav_repo)], check=True)
 subprocess.run(['pip', 'install', '-r', 'requirements.txt'], cwd=wav_repo, check=True)
-ckpt_url = secret('WAV2LIP_CHECKPOINT_URL', required=True)
-s3fd_url = secret('WAV2LIP_S3FD_URL', required=True)
+ckpt_url = os.environ['WAV2LIP_CHECKPOINT_URL']
+s3fd_url = os.environ['WAV2LIP_S3FD_URL']
 subprocess.run(['mkdir', '-p', str(wav_repo / 'checkpoints'), str(wav_repo / 'face_detection' / 'detection' / 'sfd')], check=True)
 subprocess.run(['wget', '-q', '-O', str(wav_repo / 'checkpoints' / 'wav2lip.pth'), ckpt_url], check=True)
 subprocess.run(['wget', '-q', '-O', str(wav_repo / 'face_detection' / 'detection' / 'sfd' / 's3fd.pth'), s3fd_url], check=True)
