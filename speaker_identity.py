@@ -150,6 +150,16 @@ def run_diarization_command(audio: Path, backend: str, output_json: Path) -> Dia
         return DiarizationResult(backend, "FAILED", tuple(), 0, str(exc))
 
 
+def _reference_score(audio: Path, turn: SpeakerTurn, *, max_seconds: float) -> tuple[float, float, float]:
+    """Score a turn by duration first, then by diarization confidence.
+
+    Duration is retained as the primary signal because longer speech usually gives
+    a cloning engine more phonetic coverage; confidence breaks ties deterministically.
+    """
+    duration = min(float(turn.end - turn.start), max_seconds)
+    return (duration, float(turn.confidence), -float(turn.start))
+
+
 def extract_best_reference_clips(
     audio: Path,
     turns: Iterable[SpeakerTurn],
@@ -174,7 +184,7 @@ def extract_best_reference_clips(
 
     references: dict[str, Path] = {}
     for sid, speaker_turns in candidates.items():
-        best = max(speaker_turns, key=lambda t: (t.end - t.start, -t.start))
+        best = max(speaker_turns, key=lambda t: _reference_score(audio, t, max_seconds=max_seconds))
         end = min(best.end, best.start + max_seconds)
         references[sid] = extract_reference_clip(audio, sid, best.start, end, output_dir)
     return references
