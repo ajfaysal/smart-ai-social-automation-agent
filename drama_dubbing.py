@@ -2,7 +2,7 @@ import json, os, shutil, subprocess, tempfile, uuid
 from pathlib import Path
 from multilingual_voice_routing import voice_for_character
 from demucs_provider import separate as audited_demucs_separate
-from provider_runtime import reset_provider_executions, snapshot
+from provider_runtime import finalize, record, reset_provider_executions, snapshot
 import requests
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
@@ -47,13 +47,13 @@ def director_plan(segments):
     r=api_request("POST","https://api.openai.com/v1/chat/completions",json={"model":os.getenv("DUBBING_DIRECTOR_MODEL",os.getenv("DUBBING_TRANSLATION_MODEL","gpt-4o-mini")),"temperature":0.1,"messages":[{"role":"system","content":system},{"role":"user","content":json.dumps(payload,ensure_ascii=False)}]})
     if not r.ok: raise RuntimeError(r.text)
     text=r.json()["choices"][0]["message"]["content"].strip()
-    if text.startswith("```"): text=text.split("\n",1)[1].rsplit("```",1)[0].strip()
+    if text.startswith("```"): text=text.split("\\n",1)[1].rsplit("```",1)[0].strip()
     try:data=json.loads(text)
     except json.JSONDecodeError:data=[]
     return {int(x["i"]):x for x in data if isinstance(x,dict) and "i" in x}
 
 def translate(text,target_language,max_seconds,emotion):
-    r=api_request("POST","https://api.openai.com/v1/chat/completions",json={"model":os.getenv("DUBBING_TRANSLATION_MODEL","gpt-4o-mini"),"temperature":0.15,"messages":[{"role":"system","content":"You are a professional audiovisual dubbing adapter. Preserve meaning, names, relationships and emotion. Timing is a hard constraint. Use the fewest natural spoken words needed to fit the exact window. Return only dialogue."},{"role":"user","content":f"Translate into {target_language}. Emotion: {emotion}. Exact spoken window: {max_seconds:.2f} seconds. Make it natural and concise:\n{text}"}]})
+    r=api_request("POST","https://api.openai.com/v1/chat/completions",json={"model":os.getenv("DUBBING_TRANSLATION_MODEL","gpt-4o-mini"),"temperature":0.15,"messages":[{"role":"system","content":"You are a professional audiovisual dubbing adapter. Preserve meaning, names, relationships and emotion. Timing is a hard constraint. Use the fewest natural spoken words needed to fit the exact window. Return only dialogue."},{"role":"user","content":f"Translate into {target_language}. Emotion: {emotion}. Exact spoken window: {max_seconds:.2f} seconds. Make it natural and concise:\\n{text}"}]})
     if not r.ok: raise RuntimeError(r.text)
     return r.json()["choices"][0]["message"]["content"].strip()
 
@@ -72,6 +72,10 @@ def fit_audio_exact(src,out,target):
     run(["ffmpeg","-y","-i",str(src),"-af",",".join(f),"-t",f"{target:.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(out)])
     if abs(duration(out)-target)>0.035: raise RuntimeError("Timing lock failed.")
 
+def _concat_file_line(path):
+    escaped=path.as_posix().replace("'", "'\"'\"'")
+    return "file '" + escaped + "'"
+
 def build_timeline(items,total,work):
     parts=[]; cursor=0.0
     for i,(start,end,audio) in enumerate(items):
@@ -80,7 +84,7 @@ def build_timeline(items,total,work):
         parts.append(audio); cursor=max(cursor,end)
     if cursor<total-0.001:
         tail=work/"tail.wav"; run(["ffmpeg","-y","-f","lavfi","-i","anullsrc=r=48000:cl=stereo","-t",f"{total-cursor:.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(tail)]); parts.append(tail)
-    listing=work/"concat.txt"; listing.write_text("\n".join(f"file '{p.as_posix().replace(chr(39),chr(39)+chr(92)+chr(39)+chr(39))}'" for p in parts),encoding="utf-8"); return listing
+    listing=work/"concat.txt"; listing.write_text("\\n".join(_concat_file_line(p) for p in parts),encoding="utf-8"); return listing
 
 def separate_background(source_audio,work):
     separated=audited_demucs_separate(source_audio,work)
@@ -97,7 +101,7 @@ def build_mood_music(manifest,total,work):
         mood=str(x.get("emotion") or last).lower(); mood=mood if mood in valid else last; p=work/f"music_{i}.wav"; generate_mood_track(mood,max(.1,end-start),p); chunks.append(p); cursor=end; last=mood
     if cursor<total-.02:
         p=work/"music_tail.wav"; generate_mood_track(last,total-cursor,p); chunks.append(p)
-    listing=work/"music_concat.txt"; listing.write_text("\n".join(f"file '{p.as_posix().replace(chr(39),chr(39)+chr(92)+chr(39)+chr(39))}'" for p in chunks),encoding="utf-8"); out=work/"mood_music.wav"; run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(listing),"-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(out)]); return out,dominant
+    listing=work/"music_concat.txt"; listing.write_text("\\n".join(_concat_file_line(p) for p in chunks),encoding="utf-8"); out=work/"mood_music.wav"; run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(listing),"-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(out)]); return out,dominant
 
 def master_mix(background,dubbed,music,total,work):
     out=work/"master.wav"; inputs=[]; filters=[]
@@ -113,18 +117,29 @@ def attach_audio(video,audio,out,total): run(["ffmpeg","-y","-i",str(video),"-i"
 def write_srt(manifest,path):
     def stamp(v):
         ms=max(0,int(round(v*1000))); h,ms=divmod(ms,3600000); m,ms=divmod(ms,60000); s,ms=divmod(ms,1000); return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-    path.write_text("\n".join(sum(([str(i),f"{stamp(x['start'])} --> {stamp(x['end'])}",x["translation"],""] for i,x in enumerate(manifest,1)),[])),encoding="utf-8")
+    path.write_text("\\n".join(sum(([str(i),f"{stamp(x['start'])} --> {stamp(x['end'])}",x["translation"],""] for i,x in enumerate(manifest,1)),[])),encoding="utf-8")
 
-def dub_video(video_path,target_language,requested_voice="auto",preserve_background=True,add_mood_music=True,lip_sync=False,speaker_routing=None):
-    reset_provider_executions(); work=Path(tempfile.mkdtemp(prefix="dubstudio_"))
+def dub_video(video_path,target_language,requested_voice="auto",preserve_background=True,add_mood_music=True,lip_sync=False,speaker_routing=None,provider_evidence=None):
+    reset_provider_executions()
+    for name, evidence in (provider_evidence or {}).items():
+        if evidence.get("state") == "succeeded":
+            record(finalize(name, configured=True, attempted=True, artifact=Path(evidence["artifact"]), min_bytes=1, reason=None, version=evidence.get("version"), capabilities=evidence.get("capabilities", [])))
+        elif evidence.get("state") == "failed":
+            finalize(name, configured=True, attempted=True, reason=evidence.get("reason", "provider_failed"), version=evidence.get("version"), capabilities=evidence.get("capabilities", []))
+        else:
+            finalize(name, configured=bool(evidence.get("configured", False)), attempted=False, reason=evidence.get("reason", "provider_not_attempted"), version=evidence.get("version"), capabilities=evidence.get("capabilities", []))
+    work=Path(tempfile.mkdtemp(prefix="dubstudio_"))
     try:
         total=duration(video_path); source_audio=work/"source.wav"; run(["ffmpeg","-y","-i",str(video_path),"-vn","-ar","48000","-ac","2","-c:a","pcm_s16le",str(source_audio)])
-        background=separate_background(source_audio,work) if preserve_background else None; transcript=transcribe(source_audio); segments=[]
+        background=separate_background(source_audio,work) if preserve_background else None; transcript=transcribe(source_audio)
+        stt_artifact=work/"stt-transcript.json"; stt_artifact.write_text(json.dumps(transcript,ensure_ascii=False,indent=2),encoding="utf-8")
+        if not finalize("stt",configured=True,attempted=True,artifact=stt_artifact,min_bytes=16,suffix=".json",capabilities=["speech_to_text","timestamped_transcript"]).applied: raise RuntimeError("STT artifact validation failed.")
+        segments=[]
         for item in transcript.get("segments",[]):
             start=float(item.get("start",0)); end=float(item.get("end",0)); text=str(item.get("text","")).strip()
             if end-start>=.05: segments.append((start,end,text))
         if not segments: raise RuntimeError("No speech segments were detected.")
-        plan=director_plan(segments); voices={}; voice_indexes={}; items=[]; manifest=[]; previous=0.0
+        plan=director_plan(segments); voices={}; voice_indexes={}; items=[]; manifest=[]; translations=[]; tts_outputs=[]; previous=0.0
         for i,(start,end,text) in enumerate(segments):
             start=max(start,previous)
             if end<=start+.05: continue
@@ -136,8 +151,12 @@ def dub_video(video_path,target_language,requested_voice="auto",preserve_backgro
                 voice_indexes[char]=len(voice_indexes)
                 voices[char]=voice_for_character(target_language,char,voice_indexes[char],requested_voice=requested_voice)
             window=end-start; translated=translate(text,target_language,window,emotion); raw=work/f"tts_{i}.mp3"; fitted=work/f"fit_{i}.wav"
-            make_tts(translated,raw,voices[char],emotion,character_id=char,reference_audio=reference_audio); fit_audio_exact(raw,fitted,window); items.append((start,end,fitted)); previous=end
+            make_tts(translated,raw,voices[char],emotion,character_id=char,reference_audio=reference_audio); tts_outputs.append(raw); translations.append({"index":i+1,"start":start,"end":end,"translation":translated,"character":char,"voice":voices[char]}); fit_audio_exact(raw,fitted,window); items.append((start,end,fitted)); previous=end
             manifest.append({"index":i+1,"character":char,"profile":profile or "neutral","voice":voices[char],"reference_audio":reference_audio,"emotion":emotion,"start":round(start,3),"end":round(end,3),"duration":round(window,3),"source":text,"translation":translated,"timing_lock":True,"drift_ms":0})
+        translation_artifact=work/"translation-manifest.json"; translation_artifact.write_text(json.dumps(translations,ensure_ascii=False,indent=2),encoding="utf-8")
+        if not finalize("translation",configured=True,attempted=True,artifact=translation_artifact,min_bytes=16,suffix=".json",capabilities=["audiovisual_translation","timing_constrained_translation"]).applied: raise RuntimeError("Translation artifact validation failed.")
+        tts_artifact=work/"tts-batch.json"; tts_artifact.write_text(json.dumps({"outputs":[str(x) for x in tts_outputs],"segments":len(tts_outputs)},ensure_ascii=False,indent=2),encoding="utf-8")
+        if not finalize("tts",configured=True,attempted=True,artifact=tts_artifact,min_bytes=16,suffix=".json",capabilities=["character_voice_routing","emotion_directed_tts"]).applied: raise RuntimeError("TTS artifact validation failed.")
         concat=build_timeline(items,total,work); dubbed=work/"dubbed.wav"; run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(concat),"-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(dubbed)])
         if abs(duration(dubbed)-total)>.05: raise RuntimeError("Final timing verification failed.")
         music,dominant=(build_mood_music(manifest,total,work) if add_mood_music else (None,"neutral")); final_audio=master_mix(background,dubbed,music,total,work)
@@ -151,6 +170,9 @@ def dub_video(video_path,target_language,requested_voice="auto",preserve_backgro
             output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"; shutil.copy2(prepared,output); lip_result={"applied":False,"provider":provider.name,"landmark_provider":landmark.name,"reason":"Lip-sync requires an available provider, FACE_DETECTOR, and facial-landmark provider; original frames retained."}
         else:
             output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"; shutil.copy2(prepared,output)
+        if lip_result and lip_result.get("applied") is True:
+            finalize("lip_sync",configured=True,attempted=True,artifact=output,min_bytes=1024,suffix=".mp4",capabilities=["shot_aware_video_lip_sync"])
+        if not finalize("final_assembly",configured=True,attempted=True,artifact=output,min_bytes=1024,suffix=".mp4",capabilities=["video_audio_mux","final_render"]).applied: raise RuntimeError("Final assembly artifact validation failed.")
         qc=validate_output(output,total,manifest); final_manifest={"version":"2.6.1","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":bool(background),"background_method":"demucs-two-stems" if background else "none","music":{"enabled":bool(music),"dominant_mood":dominant,"license":"original_procedural" if music else None},"mastering":{"target_lufs":-16,"true_peak_db":-1.5},"lip_sync":lip_result or {"applied":False,"provider":"disabled","reason":"Not requested."},"shot_qc":shot_qc,"quality_control":qc,"provider_execution":snapshot(),"segments":manifest}
         json_path=OUTPUT_DIR/f"{output.stem}.json"; json_path.write_text(json.dumps(final_manifest,ensure_ascii=False,indent=2),encoding="utf-8"); write_srt(manifest,OUTPUT_DIR/f"{output.stem}.srt"); return output,dominant,lip_result
     finally: shutil.rmtree(work,ignore_errors=True)
