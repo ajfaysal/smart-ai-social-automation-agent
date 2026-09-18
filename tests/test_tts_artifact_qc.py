@@ -68,3 +68,17 @@ def test_reference_tts_command_receives_acting_directive(monkeypatch, tmp_path):
     assert "C01" in calls["command"]
     assert calls["shell"] is True
     assert calls["check"] is True
+
+
+def test_multilingual_make_tts_uses_reference_provider_when_required(monkeypatch, tmp_path):
+    import drama_dubbing
+    calls = {}
+    def fake_synthesize(text, out_path, **kwargs):
+        calls.update(kwargs)
+    monkeypatch.setenv("REQUIRE_REFERENCE_VOICE_CLONING", "true")
+    monkeypatch.setattr("tts_provider.synthesize_reference_tts", fake_synthesize)
+    out = tmp_path / "voice.wav"
+    drama_dubbing.make_tts("Hello", out, "nova", "sad", character_id="C01", reference_audio="/runtime/C01.wav", target_language="English")
+    assert calls["character_id"] == "C01"
+    assert calls["target_language"] == "English"
+    assert calls["reference_audio"] == "/runtime/C01.wav"
