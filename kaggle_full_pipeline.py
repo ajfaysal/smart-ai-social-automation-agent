@@ -156,7 +156,7 @@ if __LANGUAGE__ == 'Bangla':
     drama_dubbing.make_tts = natural_bangla_tts
     drama_dubbing.master_mix = quality_master_mix
 
-output, mood, lip = drama_dubbing.dub_video(MUXED, __LANGUAGE__, requested_voice='auto', preserve_background=False, add_mood_music=False, lip_sync=True, speaker_routing=SPEAKER_ROUTES)
+output, mood, lip = drama_dubbing.dub_video(MUXED, __LANGUAGE__, requested_voice='auto', preserve_background=False, add_mood_music=False, lip_sync=True, speaker_routing=SPEAKER_ROUTES, provider_evidence={'diarization': {'state': 'succeeded' if identity_payload['identity'].get('status') == 'SUCCEEDED' else 'failed', 'artifact': str(SPEAKER_MANIFEST), 'reason': identity_payload['identity'].get('error') or 'real diarization manifest validated', 'capabilities': ['speaker_diarization','speaker_to_character_identity']}})
 manifest = output.with_suffix('.json')
 subtitle = output.with_suffix('.srt')
 for path in (output, manifest, subtitle):
