@@ -23,7 +23,7 @@ def test_profiles_include_multiple_genders_and_delivery_variants():
 
 def test_kaggle_runner_calls_profile_aware_tts_and_normalizes_director_hints():
     source = Path("kaggle_full_pipeline.py").read_text(encoding="utf-8")
-    assert "synthesize_bangla(text, Path(out_path), profile=voice)" in source
+    assert "synthesize_bangla(text, Path(out_path), profile=voice, character_id=character_id, reference_audio=reference_audio)" in source
     assert "drama_dubbing.VOICE_POOL = BANGLA_CHARACTER_VOICE_POOL" in source
     assert "drama_dubbing.director_plan = bangla_director_plan" in source
     assert "_profile_from_hint" in source
