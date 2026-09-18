@@ -22,6 +22,7 @@ class ReferenceVoiceQC:
     silence_ratio: float
     status: str
     reason: str | None = None
+    selection_score: float | None = None
 
 
 def _silence_ratio(path: Path, threshold: float = 0.008, chunk_frames: int = 1600) -> float:
