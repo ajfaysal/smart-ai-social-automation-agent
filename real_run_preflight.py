@@ -25,7 +25,7 @@ def _is_http_url(value: str) -> bool:
 def build_preflight(*, video_url: str, source_language: str="Chinese (Simplified)",
                     target_language: str="Bangla", require_openai: bool=True,
                     require_wav2lip: bool=True, require_diarization: bool=True,
-                    diarization_backend: str="pyannote") -> RealRunPreflight:
+                    diarization_backend: str="pyannote", require_reference_voice: bool=False) -> RealRunPreflight:
     selection=validate_v1_selection(source_language,target_language)
     video_url=str(video_url).strip()
     if not _is_http_url(video_url):
@@ -35,6 +35,10 @@ def build_preflight(*, video_url: str, source_language: str="Chinese (Simplified
     if require_wav2lip: required.extend(("WAV2LIP_CHECKPOINT_URL","WAV2LIP_S3FD_URL"))
     missing=tuple(name for name in required if not os.getenv(name,"").strip())
     runtime=[]
+    if require_reference_voice:
+        reference_keys=("BANGLA_REFERENCE_TTS_COMMAND","COSYVOICE_TTS_COMMAND","FISH_SPEECH_TTS_COMMAND","GPT_SOVITS_TTS_COMMAND","OPENVOICE_TTS_COMMAND")
+        if not any(os.getenv(name,"").strip() for name in reference_keys):
+            runtime.append("REFERENCE_TTS_ENGINE_COMMAND")
     if require_diarization:
         env_name={"pyannote":"PYANNOTE_DIARIZATION_COMMAND","3d-speaker":"THREE_D_SPEAKER_DIARIZATION_COMMAND"}.get(diarization_backend)
         if not env_name:
