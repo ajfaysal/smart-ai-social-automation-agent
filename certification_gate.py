@@ -70,11 +70,17 @@ def certify(final_video: Path, manifest: dict[str, Any], *, source_language: str
             raise RuntimeError("certification failed: reference selection evidence is incomplete")
     providers = manifest.get("provider_execution") or {}
     if not isinstance(providers, dict):
-        raise RuntimeError("certification failed: provider manifest is missing")
+        raise RuntimeError("certification failed: provider manifest is malformed")
     missing = sorted(REQUIRED_PROVIDERS - set(providers))
     if missing:
         raise RuntimeError("certification failed: missing providers: " + ", ".join(missing))
-    invalid = [name for name in REQUIRED_PROVIDERS if providers[name].get("state") != "succeeded" or providers[name].get("applied") is not True]
+    malformed = sorted(name for name in REQUIRED_PROVIDERS if not isinstance(providers[name], dict))
+    if malformed:
+        raise RuntimeError("certification failed: malformed provider evidence: " + ", ".join(malformed))
+    invalid = [
+        name for name in REQUIRED_PROVIDERS
+        if providers[name].get("state") != "succeeded" or providers[name].get("applied") is not True
+    ]
     if invalid:
         raise RuntimeError("certification failed: provider evidence not succeeded/applied: " + ", ".join(sorted(invalid)))
     return {"certified": True, "source_language": source_language, "target_language": target_language, "artifact": artifact, "lip_sync_applied": True, "final_qc": "pass", "providers": sorted(REQUIRED_PROVIDERS), "segment_count": len(segments)}
