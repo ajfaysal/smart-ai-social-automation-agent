@@ -82,3 +82,18 @@ def test_multilingual_make_tts_uses_reference_provider_when_required(monkeypatch
     assert calls["character_id"] == "C01"
     assert calls["target_language"] == "English"
     assert calls["reference_audio"] == "/runtime/C01.wav"
+
+
+def test_multilingual_reference_tts_records_provider_execution(monkeypatch, tmp_path):
+    import tts_provider
+    from provider_runtime import reset_provider_executions, snapshot
+    reference = tmp_path / "C01.wav"
+    out = tmp_path / "voice.wav"
+    monkeypatch.setattr(tts_provider, "validate_reference_voice", lambda path: type("QC", (), {"status": "SUCCEEDED"})())
+    monkeypatch.setattr(tts_provider, "validate_tts_artifact", lambda path: None)
+    monkeypatch.setattr(tts_provider, "choose_engine", lambda *args, **kwargs: ("fish-speech", reference))
+    monkeypatch.setattr(tts_provider, "run_command_engine", lambda *args, **kwargs: out.write_bytes(b"audio"))
+    reset_provider_executions()
+    tts_provider.synthesize_reference_tts("Hello", out, "C01", "English", str(reference))
+    assert snapshot()["fish-speech"]["state"] == "SUCCEEDED"
+    assert snapshot()["fish-speech"]["applied"] is True
