@@ -160,6 +160,12 @@ def _reference_score(audio: Path, turn: SpeakerTurn, *, max_seconds: float) -> t
     return (duration, float(turn.confidence), -float(turn.start))
 
 
+def _reference_score(audio: Path, turn: SpeakerTurn, *, max_seconds: float) -> tuple[float, float, float]:
+    """Score a turn by duration first, then diarization confidence, deterministically."""
+    duration = min(float(turn.end - turn.start), max_seconds)
+    return (duration, float(turn.confidence), -float(turn.start))
+
+
 def extract_best_reference_clips(
     audio: Path,
     turns: Iterable[SpeakerTurn],
