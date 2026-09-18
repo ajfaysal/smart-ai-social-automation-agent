@@ -74,6 +74,10 @@ def fit_audio_exact(src,out,target):
     run(["ffmpeg","-y","-i",str(src),"-af",",".join(f),"-t",f"{target:.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(out)])
     if abs(duration(out)-target)>0.035: raise RuntimeError("Timing lock failed.")
 
+def _concat_file_line(path):
+    escaped=path.as_posix().replace(chr(39), chr(39)+chr(92)+chr(39)+chr(39))
+    return f"file '{escaped}'"
+
 def build_timeline(items,total,work):
     parts=[]; cursor=0.0
     for i,(start,end,audio) in enumerate(items):
