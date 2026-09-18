@@ -58,6 +58,21 @@ def test_certification_fails_when_provider_evidence_is_malformed(monkeypatch, tm
         gate.certify(video, manifest(provider_execution=providers), target_language="English")
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("state", True), ("applied", 1), ("applied", "true")],
+)
+def test_certification_rejects_non_strict_provider_types(monkeypatch, tmp_path, field, value):
+    video = tmp_path / "final.mp4"
+    video.write_bytes(b"real")
+    monkeypatch.setattr(gate, "_probe", lambda p: {"duration_seconds": 10.0, "streams": ["audio", "video"]})
+    providers = manifest()["provider_execution"]
+    providers["tts"] = dict(providers["tts"])
+    providers["tts"][field] = value
+    with pytest.raises(RuntimeError, match="strictly"):
+        gate.certify(video, manifest(provider_execution=providers), target_language="English")
+
+
 @pytest.mark.parametrize("source", ["English", "Chinese"])
 def test_certification_rejects_non_chinese_source(monkeypatch, tmp_path, source):
     video = tmp_path / "final.mp4"
