@@ -106,8 +106,11 @@ def _open_source_voice(text: str, out_path: Path, character_id: str, preferred_e
         return None
     try:
         run_command_engine(engine, text, out_path, reference, character_id, acting_directive=acting_directive)
+        validate_tts_artifact(out_path)
+        finalize(engine, configured=True, attempted=True, artifact=out_path, min_bytes=1, capabilities=["reference_voice", "cross_lingual"])
         return engine
-    except Exception:
+    except Exception as exc:
+        finalize(engine, configured=True, attempted=True, reason=str(exc), capabilities=["reference_voice", "cross_lingual"])
         if require_reference:
             raise
         return None
