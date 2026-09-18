@@ -32,11 +32,17 @@ def main() -> int:
     parser.add_argument("--repo", default="ajfaysal/smart-ai-social-automation-agent")
     parser.add_argument("--ref", default="main")
     parser.add_argument("--language", default="Bangla", choices=["Bangla", "English", "Hindi"])
-    parser.add_argument("--kernel-slug", default="drama-dubbing-chinese-bangla")
+    parser.add_argument("--kernel-slug", default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    preflight = build_preflight(video_url=args.video_url, target_language=args.language)
+    preflight = build_preflight(
+        video_url=args.video_url,
+        target_language=args.language,
+        require_openai=not args.dry_run,
+        require_wav2lip=not args.dry_run,
+        require_diarization=not args.dry_run,
+    )
     if not preflight.ready:
         print(json.dumps({"ready": False, "missing_secrets": preflight.missing_secrets, "missing_runtime": preflight.missing_runtime}, ensure_ascii=False))
         return 2
@@ -52,7 +58,7 @@ def main() -> int:
             json.dumps(notebook, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         metadata = {
-            "id": f"ajfaysal/{args.kernel_slug}",
+            "id": f"ajfaysal/{args.kernel_slug or f'drama-dubbing-chinese-{args.language.lower()}' }",
             "title": f"Chinese Drama → {args.language} Dubbing",
             "code_file": "kaggle_full_pipeline.ipynb",
             "language": "python",
