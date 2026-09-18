@@ -41,3 +41,17 @@ def test_kaggle_pipeline_contains_runtime_speaker_execution():
     ]
     for token in required:
         assert token in source
+
+def test_kaggle_pipeline_reuses_canonical_diarized_transcript():
+    from kaggle_full_pipeline import build_notebook
+    notebook = build_notebook(
+        "https://example.com/source.mp4",
+        "ajfaysal/smart-ai-social-automation-agent",
+        "main",
+        "Bangla",
+    )
+    source = "".join(notebook["cells"][0]["source"])
+    assert "canonical execution timeline" in source
+    assert "drama_dubbing.transcribe = lambda" in source
+    assert "_canonical_segments" in source
+    assert "speaker_routing=SPEAKER_ROUTES" in source

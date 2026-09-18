@@ -81,6 +81,10 @@ identity_payload = prepare_speaker_aware_dubbing(
 )
 ROUTED_SEGMENTS = identity_payload['segments']
 SPEAKER_ROUTES = {int(x['index']): x for x in ROUTED_SEGMENTS if x.get('routing_status') == 'SUCCEEDED'}
+# Reuse the exact transcript that was timestamp-routed above. This prevents a second
+# transcription pass from producing different segment indices and breaking speaker routes.
+_canonical_segments = tuple(speaker_segments)
+# drama_dubbing is imported below; install the override immediately after that import.
 ROUTING_MANIFEST.write_text(json.dumps(identity_payload, ensure_ascii=False, indent=2), encoding='utf-8')
 
 wav_repo = Path('/kaggle/working/Wav2Lip')
@@ -99,6 +103,12 @@ os.environ['WAV2LIP_COMMAND'] = str(wrapper)
 os.environ['WAV2LIP_MODEL_PATH'] = str(wav_repo / 'checkpoints' / 'wav2lip.pth')
 
 import drama_dubbing
+# The diarized transcript is the canonical execution timeline. dub_video() must not
+# re-transcribe the muxed source audio, because even small segmentation changes can
+# misalign speaker routes. Preserve the exact routed segment indices/timestamps.
+drama_dubbing.transcribe = lambda _audio_path: {
+    'segments': [{'start': s[0], 'end': s[1], 'text': s[2]} for s in _canonical_segments]
+}
 from tts_provider import synthesize_bangla
 
 BANGLA_CHARACTER_VOICE_POOL = [

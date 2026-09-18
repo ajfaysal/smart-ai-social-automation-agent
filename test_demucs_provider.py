@@ -43,6 +43,7 @@ def test_valid_demucs_artifact_succeeds(tmp_path: Path, monkeypatch):
     (tmp_path / "separated").mkdir()
     expected = tmp_path / "separated" / "no_vocals.wav"
     expected.write_bytes(b"x" * 2048)
+    (tmp_path / "separated" / "vocals.wav").write_bytes(b"y" * 2048)
     result = demucs_provider.separate(tmp_path / "source.wav", tmp_path)
     assert result == expected
     assert snapshot()["demucs"]["state"] == ProviderState.SUCCEEDED.value

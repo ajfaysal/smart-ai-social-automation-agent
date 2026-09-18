@@ -49,7 +49,7 @@ def test_end_to_end_dubbing_orchestration():
             assert seconds > 0 and emotion in {"happy", "romantic"}
             return "你好" if "Hello" in text else "见到你很开心"
 
-        def fake_tts(text, out, voice, emotion):
+        def fake_tts(text, out, voice, emotion, **kwargs):
             assert text and voice and emotion
             out.write_bytes(b"tts")
 
