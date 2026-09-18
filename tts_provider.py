@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from voice_engine_registry import choose_engine, run_command_engine
+from tts_artifact_qc import validate_tts_artifact
 
 BANGLA_BASE_VOICES = {
     "bd_female": "bn-BD-NabanitaNeural",
@@ -120,6 +121,7 @@ def synthesize_bangla(text: str, out_path: Path, profile: str = "", character_in
     if _reference_voice_available():
         try:
             _reference_speak(text, out_path, character_id, reference_audio)
+            validate_tts_artifact(out_path)
             return "reference-audio-bangla"
         except Exception:
             pass
@@ -137,6 +139,7 @@ def synthesize_bangla(text: str, out_path: Path, profile: str = "", character_in
                 _edge_speak_cli(text, out_path, voice, rate, pitch)
             else:
                 _edge_speak_module(text, out_path, voice, rate, pitch)
+            validate_tts_artifact(out_path)
             return "edge-neural-multicharacter"
         except Exception:
             pass
@@ -145,5 +148,6 @@ def synthesize_bangla(text: str, out_path: Path, profile: str = "", character_in
     model = os.getenv("PIPER_BN_MODEL")
     if piper and model:
         subprocess.run([piper, "--model", model, "--output_file", str(out_path)], input=text, text=True, check=True)
+        validate_tts_artifact(out_path)
         return "piper-fallback"
     raise RuntimeError("No Bangla TTS provider is available.")
