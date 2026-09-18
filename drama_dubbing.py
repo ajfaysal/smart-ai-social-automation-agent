@@ -59,7 +59,11 @@ def translate(text,target_language,max_seconds,emotion):
     if not r.ok: raise RuntimeError(r.text)
     return r.json()["choices"][0]["message"]["content"].strip()
 
-def make_tts(text,out_path,voice,emotion,character_id=None,reference_audio=None):
+def make_tts(text,out_path,voice,emotion,character_id=None,reference_audio=None,target_language=None):
+    if target_language == "Bangla":
+        from tts_provider import synthesize_bangla
+        synthesize_bangla(text, out_path, profile=voice, character_id=character_id, reference_audio=reference_audio)
+        return
     r=api_request("POST","https://api.openai.com/v1/audio/speech",json={"model":os.getenv("DUBBING_TTS_MODEL","gpt-4o-mini-tts"),"voice":voice,"input":text,"instructions":f"Professional drama acting. {acting_directive(emotion)}. Natural conversational delivery. Match intensity to the scene. Do not add words or narration.","response_format":"mp3"})
     if not r.ok: raise RuntimeError(r.text)
     out_path.write_bytes(r.content)
@@ -153,7 +157,7 @@ def dub_video(video_path,target_language,requested_voice="auto",preserve_backgro
                 voice_indexes[char]=len(voice_indexes)
                 voices[char]=voice_for_character(target_language,char,voice_indexes[char],requested_voice=requested_voice)
             window=end-start; translated=translate(text,target_language,window,emotion); raw=work/f"tts_{i}.mp3"; fitted=work/f"fit_{i}.wav"
-            make_tts(translated,raw,voices[char],emotion,character_id=char,reference_audio=reference_audio); tts_outputs.append(raw); translations.append({"index":i+1,"start":start,"end":end,"translation":translated,"character":char,"voice":voices[char]}); timing_qc=fit_audio_exact(raw,fitted,window) or {"timing_lock":True,"drift_ms":0.0,"target_seconds":window,"fitted_duration_seconds":window,"drift_seconds":0.0}; items.append((start,end,fitted)); previous=end
+            make_tts(translated,raw,voices[char],emotion,character_id=char,reference_audio=reference_audio,target_language=target_language); tts_outputs.append(raw); translations.append({"index":i+1,"start":start,"end":end,"translation":translated,"character":char,"voice":voices[char]}); timing_qc=fit_audio_exact(raw,fitted,window) or {"timing_lock":True,"drift_ms":0.0,"target_seconds":window,"fitted_duration_seconds":window,"drift_seconds":0.0}; items.append((start,end,fitted)); previous=end
             manifest.append({"index":i+1,"character":char,"profile":profile or "neutral","voice":voices[char],"reference_audio":reference_audio,"emotion":emotion,"acting_directive":acting,"start":round(start,3),"end":round(end,3),"duration":round(window,3),"source":text,"translation":translated,"timing_lock":timing_qc["timing_lock"],"drift_ms":timing_qc["drift_ms"],"timing_qc":timing_qc})
         translation_artifact=work/"translation-manifest.json"; translation_artifact.write_text(json.dumps(translations,ensure_ascii=False,indent=2),encoding="utf-8")
         if not finalize("translation",configured=True,attempted=True,artifact=translation_artifact,min_bytes=16,suffix=".json",capabilities=["audiovisual_translation","timing_constrained_translation"]).applied: raise RuntimeError("Translation artifact validation failed.")
