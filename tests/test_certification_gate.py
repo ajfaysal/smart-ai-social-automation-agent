@@ -7,6 +7,9 @@ import certification_gate as gate
 def manifest(**overrides):
     data = {
         "quality_control": {"status": "pass"},
+        "original_dialogue_in_final": False,
+        "background_preserved": False,
+        "music": {"enabled": False},
         "lip_sync": {"applied": True},
         "shot_qc": {"status": "pass"},
         "segments": [{"character": "C1", "voice": "nova", "reference_audio": "/runtime/C1.wav", "reference_qc": {"status": "SUCCEEDED"}, "reference_selection_score": [2.0, 0.9, -1.0], "timing_lock": True}],
