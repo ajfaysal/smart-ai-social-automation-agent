@@ -52,6 +52,15 @@ def certify(final_video: Path, manifest: dict[str, Any], *, source_language: str
         raise RuntimeError("certification failed: incomplete speaker routing evidence")
     if any(x.get("timing_lock") is not True for x in segments):
         raise RuntimeError("certification failed: timing-lock evidence is incomplete")
+    for segment in segments:
+        if not segment.get("reference_audio"):
+            raise RuntimeError("certification failed: reference voice evidence is missing")
+        reference_qc = segment.get("reference_qc") or {}
+        if reference_qc.get("status") != "SUCCEEDED":
+            raise RuntimeError("certification failed: reference voice QC is not successful")
+        score = segment.get("reference_selection_score")
+        if not isinstance(score, (list, tuple)) or len(score) != 3:
+            raise RuntimeError("certification failed: reference selection evidence is incomplete")
     providers = manifest.get("provider_execution") or {}
     if not isinstance(providers, dict):
         raise RuntimeError("certification failed: provider manifest is missing")
