@@ -55,6 +55,7 @@ jobs:
               require_openai=False,
               require_wav2lip=False,
               require_diarization=False,
+              require_reference_voice=True,
           )
           print(p)
           if not p.ready:

@@ -46,3 +46,17 @@ def test_kaggle_notebook_supports_3d_speaker_runtime_contract():
     notebook = build_notebook("https://example.com/drama.mp4", "ajfaysal/smart-ai-social-automation-agent", "main", "Hindi")
     source = "".join(notebook["cells"][0]["source"])
     assert "THREE_D_SPEAKER_DIARIZATION_COMMAND" in source
+
+
+def test_reference_voice_preflight_requires_a_reference_tts_engine(monkeypatch):
+    for key in ("BANGLA_REFERENCE_TTS_COMMAND","COSYVOICE_TTS_COMMAND","FISH_SPEECH_TTS_COMMAND","GPT_SOVITS_TTS_COMMAND","OPENVOICE_TTS_COMMAND"):
+        monkeypatch.delenv(key, raising=False)
+    result=build_preflight(video_url="https://example.com/drama.mp4", require_openai=False, require_wav2lip=False, require_diarization=False, require_reference_voice=True)
+    assert not result.ready
+    assert "REFERENCE_TTS_ENGINE_COMMAND" in result.missing_runtime
+
+
+def test_reference_voice_preflight_accepts_configured_engine(monkeypatch):
+    monkeypatch.setenv("FISH_SPEECH_TTS_COMMAND", "fish --text {text} --output {output} --reference {reference}")
+    result=build_preflight(video_url="https://example.com/drama.mp4", require_openai=False, require_wav2lip=False, require_diarization=False, require_reference_voice=True)
+    assert result.ready
