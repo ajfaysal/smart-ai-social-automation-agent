@@ -1,5 +1,6 @@
 import json, os, shutil, subprocess, tempfile, uuid
 from pathlib import Path
+from multilingual_voice_routing import voice_for_character
 from demucs_provider import separate as audited_demucs_separate
 from provider_runtime import reset_provider_executions, snapshot
 import requests
@@ -17,7 +18,6 @@ from shot_qc import validate_reassembled
 
 app=FastAPI(title="DubStudio AI",version="2.6.1")
 BASE_DIR=Path(__file__).parent; OUTPUT_DIR=BASE_DIR/"dubbed_output"; OUTPUT_DIR.mkdir(exist_ok=True)
-app.mount("/static",StaticFiles(directory=BASE_DIR/"static"),name="static")
 LANGUAGES={"English":"en","Bangla":"bn","Hindi":"hi","Spanish":"es","Arabic":"ar","French":"fr","German":"de","Portuguese":"pt","Indonesian":"id","Urdu":"ur","Tamil":"ta","Telugu":"te","Chinese (Simplified)":"zh-CN","Chinese (Traditional)":"zh-TW"}
 VOICES={"alloy","echo","fable","onyx","nova","shimmer"}; VOICE_POOL=["nova","onyx","shimmer","echo","fable","alloy"]; MAX_UPLOAD_BYTES=500*1024*1024; SUPPORTED_EXTENSIONS={".mp4",".mov",".mkv",".webm",".avi"}
 
@@ -113,11 +113,10 @@ def attach_audio(video,audio,out,total): run(["ffmpeg","-y","-i",str(video),"-i"
 def write_srt(manifest,path):
     def stamp(v):
         ms=max(0,int(round(v*1000))); h,ms=divmod(ms,3600000); m,ms=divmod(ms,60000); s,ms=divmod(ms,1000); return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-    path.write_text("\n".join(sum(([str(i),f"{stamp(x['start'])} --> {stamp(x['end'])}",x['translation'],""] for i,x in enumerate(manifest,1)),[])),encoding="utf-8")
+    path.write_text("\n".join(sum(([str(i),f"{stamp(x['start'])} --> {stamp(x['end'])}",x["translation"],""] for i,x in enumerate(manifest,1)),[])),encoding="utf-8")
 
 def dub_video(video_path,target_language,requested_voice="auto",preserve_background=True,add_mood_music=True,lip_sync=False,speaker_routing=None):
-    reset_provider_executions()
-    work=Path(tempfile.mkdtemp(prefix="dubstudio_"))
+    reset_provider_executions(); work=Path(tempfile.mkdtemp(prefix="dubstudio_"))
     try:
         total=duration(video_path); source_audio=work/"source.wav"; run(["ffmpeg","-y","-i",str(video_path),"-vn","-ar","48000","-ac","2","-c:a","pcm_s16le",str(source_audio)])
         background=separate_background(source_audio,work) if preserve_background else None; transcript=transcribe(source_audio); segments=[]
@@ -125,22 +124,19 @@ def dub_video(video_path,target_language,requested_voice="auto",preserve_backgro
             start=float(item.get("start",0)); end=float(item.get("end",0)); text=str(item.get("text","")).strip()
             if end-start>=.05: segments.append((start,end,text))
         if not segments: raise RuntimeError("No speech segments were detected.")
-        plan=director_plan(segments); voices={}; items=[]; manifest=[]; previous=0.0
+        plan=director_plan(segments); voices={}; voice_indexes={}; items=[]; manifest=[]; previous=0.0
         for i,(start,end,text) in enumerate(segments):
             start=max(start,previous)
             if end<=start+.05: continue
             info=plan.get(i,{"character":f"C{i+1}","profile":"neutral","emotion":"neutral"})
             route=(speaker_routing or {}).get(i) or {}
             char=str(route.get("character_id") or info.get("character") or f"C{i+1}")
-            emotion=str(info.get("emotion") or "neutral")
-            profile=str(route.get("voice_profile") or info.get("profile") or "")
-            reference_audio=route.get("reference_audio")
+            emotion=str(info.get("emotion") or "neutral"); profile=str(route.get("voice_profile") or info.get("profile") or ""); reference_audio=route.get("reference_audio")
             if char not in voices:
-                # The director's profile is authoritative when the selected
-                # provider supports it (Bangla profiles are handled by the
-                # Kaggle runner). Otherwise retain the generic voice pool.
-                voices[char] = profile if profile in VOICE_POOL else (requested_voice if requested_voice!="auto" else VOICE_POOL[len(voices)%len(VOICE_POOL)])
-            window=end-start; translated=translate(text,target_language,window,emotion); raw=work/f"tts_{i}.mp3"; fitted=work/f"fit_{i}.wav"; make_tts(translated,raw,voices[char],emotion,character_id=char,reference_audio=reference_audio); fit_audio_exact(raw,fitted,window); items.append((start,end,fitted)); previous=end
+                voice_indexes[char]=len(voice_indexes)
+                voices[char]=voice_for_character(target_language,char,voice_indexes[char],requested_voice=requested_voice)
+            window=end-start; translated=translate(text,target_language,window,emotion); raw=work/f"tts_{i}.mp3"; fitted=work/f"fit_{i}.wav"
+            make_tts(translated,raw,voices[char],emotion,character_id=char,reference_audio=reference_audio); fit_audio_exact(raw,fitted,window); items.append((start,end,fitted)); previous=end
             manifest.append({"index":i+1,"character":char,"profile":profile or "neutral","voice":voices[char],"reference_audio":reference_audio,"emotion":emotion,"start":round(start,3),"end":round(end,3),"duration":round(window,3),"source":text,"translation":translated,"timing_lock":True,"drift_ms":0})
         concat=build_timeline(items,total,work); dubbed=work/"dubbed.wav"; run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(concat),"-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(dubbed)])
         if abs(duration(dubbed)-total)>.05: raise RuntimeError("Final timing verification failed.")
@@ -157,5 +153,4 @@ def dub_video(video_path,target_language,requested_voice="auto",preserve_backgro
             output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"; shutil.copy2(prepared,output)
         qc=validate_output(output,total,manifest); final_manifest={"version":"2.6.1","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":bool(background),"background_method":"demucs-two-stems" if background else "none","music":{"enabled":bool(music),"dominant_mood":dominant,"license":"original_procedural" if music else None},"mastering":{"target_lufs":-16,"true_peak_db":-1.5},"lip_sync":lip_result or {"applied":False,"provider":"disabled","reason":"Not requested."},"shot_qc":shot_qc,"quality_control":qc,"provider_execution":snapshot(),"segments":manifest}
         json_path=OUTPUT_DIR/f"{output.stem}.json"; json_path.write_text(json.dumps(final_manifest,ensure_ascii=False,indent=2),encoding="utf-8"); write_srt(manifest,OUTPUT_DIR/f"{output.stem}.srt"); return output,dominant,lip_result
-    finally:
-        shutil.rmtree(work,ignore_errors=True)
+    finally: shutil.rmtree(work,ignore_errors=True)
