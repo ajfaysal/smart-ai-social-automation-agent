@@ -87,7 +87,7 @@ def build_timeline(items,total,work):
     if cursor<total-0.001:
         tail=work/"tail.wav"; run(["ffmpeg","-y","-f","lavfi","-i","anullsrc=r=48000:cl=stereo","-t",f"{total-cursor:.3f}","-ar","48000","-ac","2","-c:a","pcm_s16le",str(tail)]); parts.append(tail)
     listing=work/"concat.txt"; listing.write_text("
-".join(f"file '{p.as_posix().replace(chr(39),chr(39)+chr(92)+chr(39)+chr(39))}'" for p in parts),encoding="utf-8"); return listing
+".join(_concat_file_line(p) for p in parts),encoding="utf-8"); return listing
 
 def separate_background(source_audio,work):
     separated=audited_demucs_separate(source_audio,work)
@@ -105,7 +105,7 @@ def build_mood_music(manifest,total,work):
     if cursor<total-.02:
         p=work/"music_tail.wav"; generate_mood_track(last,total-cursor,p); chunks.append(p)
     listing=work/"music_concat.txt"; listing.write_text("
-".join(f"file '{p.as_posix().replace(chr(39),chr(39)+chr(92)+chr(39)+chr(39))}'" for p in chunks),encoding="utf-8"); out=work/"mood_music.wav"; run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(listing),"-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(out)]); return out,dominant
+".join(_concat_file_line(p) for p in chunks),encoding="utf-8"); out=work/"mood_music.wav"; run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(listing),"-ar","48000","-ac","2","-c:a","pcm_s16le","-t",f"{total:.3f}",str(out)]); return out,dominant
 
 def master_mix(background,dubbed,music,total,work):
     out=work/"master.wav"; inputs=[]; filters=[]
