@@ -83,6 +83,12 @@ def validate_downloaded_artifacts(output_dir: Path) -> dict:
     if not reported_output:
         raise RuntimeError("Kaggle output report does not identify the final video")
     final_name = Path(reported_output).name
+    reported_sha = str(report.get('output_sha256', '')).strip().lower()
+    if len(reported_sha) != 64 or any(c not in '0123456789abcdef' for c in reported_sha):
+        raise RuntimeError('Certified output report has no valid output_sha256')
+    reported_manifest = str(report.get('manifest_filename', '')).strip()
+    if reported_manifest != f'{Path(final_name).stem}.json':
+        raise RuntimeError('Certified output report manifest does not match final video')
     videos = [p for p in output_dir.rglob("*.mp4") if p.name == final_name]
     if len(videos) != 1:
         raise RuntimeError("Expected exactly one MP4 matching the certified final output")
@@ -97,6 +103,10 @@ def validate_downloaded_artifacts(output_dir: Path) -> dict:
         raise RuntimeError("Certified output is missing the final dubbing manifest beside the MP4")
     import hashlib
     digest = hashlib.sha256(final_video.read_bytes()).hexdigest()
+    if digest != reported_sha:
+        raise RuntimeError('Certified final video SHA-256 does not match cloud certification report')
+    if manifest.name != reported_manifest:
+        raise RuntimeError('Certified manifest does not match cloud certification report')
     return {"certification": data, "final_video": str(final_video), "final_video_sha256": digest, "manifest": str(manifest), "evidence": sorted(required), "cloud_report": str(report_files[0])}
 
 
