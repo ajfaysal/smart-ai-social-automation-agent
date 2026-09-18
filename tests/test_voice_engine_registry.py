@@ -54,3 +54,18 @@ def test_command_engine_renders_acting_directive(monkeypatch, tmp_path: Path):
     assert "--acting" in calls["args"]
     assert calls["args"][calls["args"].index("--acting") + 1] == "sad, whispering"
     assert calls["check"] is True
+
+
+def test_command_engine_renders_target_language(monkeypatch, tmp_path: Path):
+    import voice_engine_registry
+    output = tmp_path / "out.wav"
+    reference = tmp_path / "ref.wav"
+    reference.write_bytes(b"reference")
+    calls = {}
+    monkeypatch.setenv("FISH_SPEECH_TTS_COMMAND", 'fish --text {text} --output {output} --reference {reference} --language "{language}"')
+    def fake_run(args, check, capture_output, text):
+        calls["args"] = args
+    monkeypatch.setattr(voice_engine_registry.subprocess, "run", fake_run)
+    output.write_bytes(b"audio")
+    voice_engine_registry.run_command_engine("fish-speech", "hello", output, reference, "C1", target_language="Hindi")
+    assert calls["args"][calls["args"].index("--language") + 1] == "Hindi"

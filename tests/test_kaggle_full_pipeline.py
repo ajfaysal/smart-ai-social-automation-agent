@@ -15,6 +15,8 @@ def test_full_notebook_is_secret_free_and_uses_canonical_pipeline():
     assert notebook["nbformat"] == 4
     assert "UserSecretsClient" in source
     assert "OPENAI_API_KEY" in source
+    assert "REQUIRE_REFERENCE_VOICE_CLONING" in source
+    assert "FISH_SPEECH_TTS_COMMAND" in source
     assert "WAV2LIP_CHECKPOINT_URL" in source
     assert "WAV2LIP_S3FD_URL" in source
     assert "dub_video(" in source

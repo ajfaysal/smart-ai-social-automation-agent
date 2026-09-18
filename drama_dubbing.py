@@ -60,11 +60,16 @@ def translate(text,target_language,max_seconds,emotion):
     return r.json()["choices"][0]["message"]["content"].strip()
 
 def make_tts(text,out_path,voice,emotion,character_id=None,reference_audio=None,target_language=None):
+    directive = acting_directive(emotion, voice)
     if target_language == "Bangla":
         from tts_provider import synthesize_bangla
-        synthesize_bangla(text, out_path, profile=voice, character_id=character_id, reference_audio=reference_audio, acting_directive=acting_directive(emotion, voice))
+        synthesize_bangla(text, out_path, profile=voice, character_id=character_id, reference_audio=reference_audio, acting_directive=directive)
         return
-    r=api_request("POST","https://api.openai.com/v1/audio/speech",json={"model":os.getenv("DUBBING_TTS_MODEL","gpt-4o-mini-tts"),"voice":voice,"input":text,"instructions":f"Professional drama acting. {acting_directive(emotion)}. Natural conversational delivery. Match intensity to the scene. Do not add words or narration.","response_format":"mp3"})
+    if os.getenv("REQUIRE_REFERENCE_VOICE_CLONING", "").strip().lower() in {"1", "true", "yes", "on"}:
+        from tts_provider import synthesize_reference_tts
+        synthesize_reference_tts(text, out_path, character_id=character_id or voice, target_language=target_language or "English", reference_audio=reference_audio, acting_directive=directive)
+        return
+    r=api_request("POST","https://api.openai.com/v1/audio/speech",json={"model":os.getenv("DUBBING_TTS_MODEL","gpt-4o-mini-tts"),"voice":voice,"input":text,"instructions":f"Professional drama acting. {directive}. Natural conversational delivery. Match intensity to the scene. Do not add words or narration.","response_format":"mp3"})
     if not r.ok: raise RuntimeError(r.text)
     out_path.write_bytes(r.content)
 
