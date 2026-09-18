@@ -29,7 +29,7 @@ permissions:
 jobs:
   dispatch:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 75
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -102,3 +102,15 @@ jobs:
         with:
           name: kaggle-certification-dispatch
           path: validation-artifacts/kaggle-dispatch.json
+      - name: Wait for Kaggle certification
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          KERNEL_SLUG: ${{ inputs.kernel_slug }}
+        run: |
+          python kaggle_certification_operator.py "ajfaysal/$KERNEL_SLUG" --timeout 3600 --poll 30 --output-dir kaggle-certification-output
+      - name: Upload certified artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaggle-real-certification
+          path: kaggle-certification-output/
