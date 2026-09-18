@@ -34,15 +34,26 @@ def main() -> int:
     parser.add_argument("--language", default="Bangla", choices=["Bangla", "English", "Hindi"])
     parser.add_argument("--kernel-slug", default=None)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--dispatch-only", action="store_true", help="Build and submit the Kaggle kernel without requiring provider runtime secrets in GitHub.")
     args = parser.parse_args()
 
-    preflight = build_preflight(
-        video_url=args.video_url,
-        target_language=args.language,
-        require_openai=not args.dry_run,
-        require_wav2lip=not args.dry_run,
-        require_diarization=not args.dry_run,
-    )
+    if args.dispatch_only:
+        # Provider secrets belong to Kaggle Secrets and must not be duplicated in GitHub.
+        preflight = build_preflight(
+            video_url=args.video_url,
+            target_language=args.language,
+            require_openai=False,
+            require_wav2lip=False,
+            require_diarization=False,
+        )
+    else:
+        preflight = build_preflight(
+            video_url=args.video_url,
+            target_language=args.language,
+            require_openai=not args.dry_run,
+            require_wav2lip=not args.dry_run,
+            require_diarization=not args.dry_run,
+        )
     if not preflight.ready:
         print(json.dumps({"ready": False, "missing_secrets": preflight.missing_secrets, "missing_runtime": preflight.missing_runtime}, ensure_ascii=False))
         return 2
