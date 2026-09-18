@@ -97,3 +97,16 @@ def test_multilingual_reference_tts_records_provider_execution(monkeypatch, tmp_
     tts_provider.synthesize_reference_tts("Hello", out, "C01", "English", str(reference))
     assert snapshot()["fish-speech"]["state"] == "SUCCEEDED"
     assert snapshot()["fish-speech"]["applied"] is True
+
+
+def test_open_source_bangla_reference_tts_validates_output(monkeypatch, tmp_path):
+    import tts_provider
+    reference = tmp_path / "C01.wav"
+    out = tmp_path / "voice.wav"
+    calls = []
+    monkeypatch.setenv("REQUIRE_REFERENCE_VOICE_CLONING", "true")
+    monkeypatch.setattr(tts_provider, "choose_engine", lambda *args, **kwargs: ("fish-speech", reference))
+    monkeypatch.setattr(tts_provider, "run_command_engine", lambda *args, **kwargs: out.write_bytes(b"audio"))
+    monkeypatch.setattr(tts_provider, "validate_tts_artifact", lambda path: calls.append(path))
+    assert tts_provider.synthesize_bangla("হ্যালো", out, character_id="C01", reference_audio=str(reference)) == "fish-speech"
+    assert calls == [out]
