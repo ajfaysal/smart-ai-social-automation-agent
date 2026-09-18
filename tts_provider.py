@@ -112,7 +112,7 @@ def _open_source_voice(text: str, out_path: Path, character_id: str, preferred_e
         return None
 
 
-def synthesize_bangla(text: str, out_path: Path, profile: str = "", character_index: int = 0, rate: str | None = None, pitch: str | None = None, character_id: str | None = None, preferred_engine: str | None = None, reference_audio: str | None = None) -> str:
+def synthesize_bangla(text: str, out_path: Path, profile: str = "", character_index: int = 0, rate: str | None = None, pitch: str | None = None, character_id: str | None = None, preferred_engine: str | None = None, reference_audio: str | None = None, acting_directive: str | None = None) -> str:
     """Use a multi-engine cascade for high-character-count Chinese dubbing.
 
     Reference-audio adapters are preferred; configured open-source engines can be
@@ -130,14 +130,14 @@ def synthesize_bangla(text: str, out_path: Path, profile: str = "", character_in
 
     if _reference_voice_available():
         try:
-            _reference_speak(text, out_path, character_id, reference_audio)
+            _reference_speak(text, out_path, character_id, reference_audio, acting_directive=acting_directive)
             validate_tts_artifact(out_path)
             return "reference-audio-bangla"
         except Exception:
             if require_reference:
                 raise
 
-    engine = _open_source_voice(text, out_path, character_id, preferred_engine, require_reference=require_reference)
+    engine = _open_source_voice(text, out_path, character_id, preferred_engine, require_reference=require_reference, acting_directive=acting_directive)
     if engine:
         return engine
     if require_reference:
