@@ -16,6 +16,7 @@ from scene_analysis import detect_shots
 from shot_lipsync import process_shots
 from shot_qc import validate_reassembled
 from tts_timing_qc import validate_timing_lock
+from tts_acting import acting_directive, normalize_emotion
 
 app=FastAPI(title="DubStudio AI",version="2.6.1")
 BASE_DIR=Path(__file__).parent; OUTPUT_DIR=BASE_DIR/"dubbed_output"; OUTPUT_DIR.mkdir(exist_ok=True)
@@ -59,7 +60,7 @@ def translate(text,target_language,max_seconds,emotion):
     return r.json()["choices"][0]["message"]["content"].strip()
 
 def make_tts(text,out_path,voice,emotion,character_id=None,reference_audio=None):
-    r=api_request("POST","https://api.openai.com/v1/audio/speech",json={"model":os.getenv("DUBBING_TTS_MODEL","gpt-4o-mini-tts"),"voice":voice,"input":text,"instructions":f"Professional drama acting. Emotion: {emotion}. Natural conversational delivery. Match intensity to the scene. Do not add words or narration.","response_format":"mp3"})
+    r=api_request("POST","https://api.openai.com/v1/audio/speech",json={"model":os.getenv("DUBBING_TTS_MODEL","gpt-4o-mini-tts"),"voice":voice,"input":text,"instructions":f"Professional drama acting. {acting_directive(emotion)}. Natural conversational delivery. Match intensity to the scene. Do not add words or narration.","response_format":"mp3"})
     if not r.ok: raise RuntimeError(r.text)
     out_path.write_bytes(r.content)
 
@@ -147,13 +148,13 @@ def dub_video(video_path,target_language,requested_voice="auto",preserve_backgro
             info=plan.get(i,{"character":f"C{i+1}","profile":"neutral","emotion":"neutral"})
             route=(speaker_routing or {}).get(i) or {}
             char=str(route.get("character_id") or info.get("character") or f"C{i+1}")
-            emotion=str(info.get("emotion") or "neutral"); profile=str(route.get("voice_profile") or info.get("profile") or ""); reference_audio=route.get("reference_audio")
+            emotion=normalize_emotion(info.get("emotion")); profile=str(route.get("voice_profile") or info.get("profile") or ""); acting=acting_directive(emotion, profile); reference_audio=route.get("reference_audio")
             if char not in voices:
                 voice_indexes[char]=len(voice_indexes)
                 voices[char]=voice_for_character(target_language,char,voice_indexes[char],requested_voice=requested_voice)
             window=end-start; translated=translate(text,target_language,window,emotion); raw=work/f"tts_{i}.mp3"; fitted=work/f"fit_{i}.wav"
             make_tts(translated,raw,voices[char],emotion,character_id=char,reference_audio=reference_audio); tts_outputs.append(raw); translations.append({"index":i+1,"start":start,"end":end,"translation":translated,"character":char,"voice":voices[char]}); timing_qc=fit_audio_exact(raw,fitted,window) or {"timing_lock":True,"drift_ms":0.0,"target_seconds":window,"fitted_duration_seconds":window,"drift_seconds":0.0}; items.append((start,end,fitted)); previous=end
-            manifest.append({"index":i+1,"character":char,"profile":profile or "neutral","voice":voices[char],"reference_audio":reference_audio,"emotion":emotion,"start":round(start,3),"end":round(end,3),"duration":round(window,3),"source":text,"translation":translated,"timing_lock":timing_qc["timing_lock"],"drift_ms":timing_qc["drift_ms"],"timing_qc":timing_qc})
+            manifest.append({"index":i+1,"character":char,"profile":profile or "neutral","voice":voices[char],"reference_audio":reference_audio,"emotion":emotion,"acting_directive":acting,"start":round(start,3),"end":round(end,3),"duration":round(window,3),"source":text,"translation":translated,"timing_lock":timing_qc["timing_lock"],"drift_ms":timing_qc["drift_ms"],"timing_qc":timing_qc})
         translation_artifact=work/"translation-manifest.json"; translation_artifact.write_text(json.dumps(translations,ensure_ascii=False,indent=2),encoding="utf-8")
         if not finalize("translation",configured=True,attempted=True,artifact=translation_artifact,min_bytes=16,suffix=".json",capabilities=["audiovisual_translation","timing_constrained_translation"]).applied: raise RuntimeError("Translation artifact validation failed.")
         tts_artifact=work/"tts-batch.json"; tts_artifact.write_text(json.dumps({"outputs":[str(x) for x in tts_outputs],"segments":len(tts_outputs)},ensure_ascii=False,indent=2),encoding="utf-8")
