@@ -57,6 +57,8 @@ def certify(final_video: Path, manifest: dict[str, Any], *, source_language: str
         raise RuntimeError("certification failed: speaker/character segments are missing")
     if any(not isinstance(x, dict) or not x.get("character") or not x.get("voice") for x in segments):
         raise RuntimeError("certification failed: incomplete speaker routing evidence")
+    if any(x.get("routing_status") != "SUCCEEDED" for x in segments):
+        raise RuntimeError("certification failed: speaker routing did not succeed for every segment")
     if any(x.get("timing_lock") is not True for x in segments):
         raise RuntimeError("certification failed: timing-lock evidence is incomplete")
     for segment in segments:
@@ -83,6 +85,7 @@ def certify(final_video: Path, manifest: dict[str, Any], *, source_language: str
         or providers[name].get("state") != "succeeded"
         or type(providers[name].get("applied")) is not bool
         or providers[name].get("applied") is not True
+        or providers[name].get("reason") != "artifact_valid"
     ]
     if invalid:
         raise RuntimeError("certification failed: provider evidence not strictly succeeded/applied: " + ", ".join(sorted(invalid)))
