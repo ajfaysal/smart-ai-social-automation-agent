@@ -129,8 +129,24 @@ def main() -> int:
         return 2
 
     output_dir = Path(args.output_dir)
-    download_output(args.kernel, output_dir)
-    evidence = validate_downloaded_artifacts(output_dir)
+    try:
+        download_output(args.kernel, output_dir)
+        evidence = validate_downloaded_artifacts(output_dir)
+    except Exception as exc:
+        failure = {
+            "certified": False,
+            "state": state,
+            "kernel": args.kernel,
+            "reason": str(exc),
+            "output_dir": str(output_dir),
+        }
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "certification-failure.json").write_text(
+            json.dumps(failure, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(json.dumps(failure, ensure_ascii=False, indent=2))
+        return 2
     print(json.dumps({"certified": True, **evidence}, ensure_ascii=False, indent=2))
     return 0
 
