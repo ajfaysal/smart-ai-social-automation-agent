@@ -1,11 +1,13 @@
 """Poll and retrieve outputs from a Kaggle real-certification kernel.
 
 This tool never treats submission as certification. A certification is valid only
-when the downloaded certification.json reports certified=true.
+when the downloaded certification.json reports certified=true. Failed kernels
+are still queried for available output files to preserve diagnostic evidence.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import time
@@ -62,8 +64,8 @@ def download_output(kernel: str, output_dir: Path) -> None:
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError((result.stdout + "\n" + result.stderr).strip())
-
+        detail = (result.stdout + "\n" + result.stderr).strip()
+        raise RuntimeError(detail or f"Kaggle output download failed with exit code {result.returncode}")
 
 
 def validate_downloaded_artifacts(output_dir: Path) -> dict:
@@ -83,12 +85,12 @@ def validate_downloaded_artifacts(output_dir: Path) -> dict:
     if not reported_output:
         raise RuntimeError("Kaggle output report does not identify the final video")
     final_name = Path(reported_output).name
-    reported_sha = str(report.get('output_sha256', '')).strip().lower()
-    if len(reported_sha) != 64 or any(c not in '0123456789abcdef' for c in reported_sha):
-        raise RuntimeError('Certified output report has no valid output_sha256')
-    reported_manifest = str(report.get('manifest_filename', '')).strip()
-    if reported_manifest != f'{Path(final_name).stem}.json':
-        raise RuntimeError('Certified output report manifest does not match final video')
+    reported_sha = str(report.get("output_sha256", "")).strip().lower()
+    if len(reported_sha) != 64 or any(c not in "0123456789abcdef" for c in reported_sha):
+        raise RuntimeError("Certified output report has no valid output_sha256")
+    reported_manifest = str(report.get("manifest_filename", "")).strip()
+    if reported_manifest != f"{Path(final_name).stem}.json":
+        raise RuntimeError("Certified output report manifest does not match final video")
     videos = [p for p in output_dir.rglob("*.mp4") if p.name == final_name]
     if len(videos) != 1:
         raise RuntimeError("Expected exactly one MP4 matching the certified final output")
@@ -101,22 +103,31 @@ def validate_downloaded_artifacts(output_dir: Path) -> dict:
     manifest = final_video.with_suffix(".json")
     if not manifest.is_file():
         raise RuntimeError("Certified output is missing the final dubbing manifest beside the MP4")
-    import hashlib
     digest = hashlib.sha256(final_video.read_bytes()).hexdigest()
     if digest != reported_sha:
-        raise RuntimeError('Certified final video SHA-256 does not match cloud certification report')
+        raise RuntimeError("Certified final video SHA-256 does not match cloud certification report")
     if manifest.name != reported_manifest:
-        raise RuntimeError('Certified manifest does not match cloud certification report')
-    return {"certification": data, "final_video": str(final_video), "final_video_sha256": digest, "manifest": str(manifest), "evidence": sorted(required), "cloud_report": str(report_files[0])}
+        raise RuntimeError("Certified manifest does not match cloud certification report")
+    return {
+        "certification": data,
+        "final_video": str(final_video),
+        "final_video_sha256": digest,
+        "manifest": str(manifest),
+        "evidence": sorted(required),
+        "cloud_report": str(report_files[0]),
+    }
 
 
-def write_failure_evidence(output_dir: Path, *, kernel: str, state: str, reason: str) -> dict:
+def write_failure_evidence(
+    output_dir: Path, *, kernel: str, state: str, reason: str, diagnostics: dict | None = None
+) -> dict:
     failure = {
         "certified": False,
         "state": state,
         "kernel": kernel,
         "reason": reason,
         "output_dir": str(output_dir),
+        "diagnostics": diagnostics or {},
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "certification-failure.json").write_text(
@@ -124,6 +135,23 @@ def write_failure_evidence(output_dir: Path, *, kernel: str, state: str, reason:
         encoding="utf-8",
     )
     return failure
+
+
+def collect_failure_diagnostics(kernel: str, output_dir: Path) -> dict:
+    """Best-effort output retrieval for failed/timeout kernels; never masks failure."""
+    diagnostics: dict = {"output_download": "not_attempted"}
+    try:
+        download_output(kernel, output_dir)
+        diagnostics["output_download"] = "succeeded"
+        files = [p for p in output_dir.rglob("*") if p.is_file() and p.name != "certification-failure.json"]
+        diagnostics["retrieved_files"] = [
+            {"name": str(p.relative_to(output_dir)), "size_bytes": p.stat().st_size}
+            for p in sorted(files)
+        ]
+    except Exception as exc:
+        diagnostics["output_download"] = "failed"
+        diagnostics["output_download_error"] = str(exc)
+    return diagnostics
 
 
 def main() -> int:
@@ -134,6 +162,7 @@ def main() -> int:
     parser.add_argument("--output-dir", default="kaggle-certification-output")
     args = parser.parse_args()
 
+    output_dir = Path(args.output_dir)
     if args.timeout:
         state, raw = wait_for_completion(args.kernel, args.timeout, args.poll)
     else:
@@ -141,13 +170,14 @@ def main() -> int:
         state = classify_status(raw)
 
     print(json.dumps({"kernel": args.kernel, "state": state, "status": raw}, ensure_ascii=False, indent=2))
-    output_dir = Path(args.output_dir)
     if state != "completed":
+        diagnostics = collect_failure_diagnostics(args.kernel, output_dir)
         failure = write_failure_evidence(
             output_dir,
             kernel=args.kernel,
             state=state,
             reason=f"Kaggle kernel did not complete successfully: {state}",
+            diagnostics=diagnostics,
         )
         print(json.dumps(failure, ensure_ascii=False, indent=2))
         return 2
