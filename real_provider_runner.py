@@ -65,7 +65,7 @@ def run_xtts(text: Path, reference: Path, output: Path, language: str) -> dict:
         raise RuntimeError("XTTS-v2 validation text must not be empty.")
     engine = synthesize_reference_tts(text_value, output, character_id=reference.stem, target_language=language, reference_audio=str(reference), preferred_engine="xtts-v2")
     qc = validate_tts_artifact(output)
-    return {"output": str(output), "engine": engine, "tts_validation": qc.to_dict(), "provider_execution": snapshot()}
+    return {"output": str(output), "engine": engine, "tts_validation": qc, "provider_execution": snapshot()}
 
 
 def run_wav2lip(video: Path, audio: Path, output: Path) -> dict:
