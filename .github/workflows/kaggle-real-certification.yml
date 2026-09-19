@@ -109,9 +109,10 @@ jobs:
           KERNEL_SLUG: ${{ inputs.kernel_slug }}
         run: |
           python kaggle_certification_operator.py "ajfaysal/$KERNEL_SLUG" --timeout 3600 --poll 30 --output-dir kaggle-certification-output
-      - name: Upload certified artifacts
-        if: success()
+      - name: Upload certification artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kaggle-real-certification
           path: kaggle-certification-output/
+          if-no-files-found: warn
