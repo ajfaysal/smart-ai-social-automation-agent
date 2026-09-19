@@ -13,6 +13,8 @@ on:
           - demucs
           - mediapipe
           - wav2lip
+          - whisper
+          - xtts-v2
       runner_label:
         description: GitHub runner label with provisioned provider dependencies/media
         required: true
@@ -29,9 +31,24 @@ on:
         default: ''
         type: string
       output_path:
-        description: Runner-local MP4 output path for Wav2Lip
+        description: Runner-local output path for Wav2Lip or XTTS-v2
         required: false
         default: 'provider-validation-work/wav2lip-output.mp4'
+        type: string
+      text_path:
+        description: Runner-local UTF-8 dialogue text for XTTS-v2
+        required: false
+        default: ''
+        type: string
+      reference_path:
+        description: Runner-local character reference audio for XTTS-v2
+        required: false
+        default: ''
+        type: string
+      language:
+        description: Target language for XTTS-v2
+        required: false
+        default: bn
         type: string
 
 jobs:
@@ -55,6 +72,47 @@ jobs:
         run: |
           mkdir -p validation-artifacts
           printf 'selected_provider=dry-run\nstatus=contract-tests-only\n' > validation-artifacts/profile.txt
+      - name: Preflight Whisper input
+        if: inputs.provider == 'whisper'
+        env:
+          MEDIA_PATH: ${{ inputs.media_path }}
+        run: |
+          test -n "$MEDIA_PATH" || { echo 'media_path is required for whisper'; exit 2; }
+          test -f "$MEDIA_PATH" || { echo "Whisper audio does not exist: $MEDIA_PATH"; exit 2; }
+          test -n "$WHISPER_LOCAL_COMMAND" || { echo 'WHISPER_LOCAL_COMMAND must be configured on the selected runner'; exit 2; }
+          mkdir -p validation-artifacts provider-validation-work
+      - name: Run Whisper large-v3 production profile
+        if: inputs.provider == 'whisper'
+        env:
+          MEDIA_PATH: ${{ inputs.media_path }}
+          WHISPER_LOCAL_COMMAND: ${{ secrets.WHISPER_LOCAL_COMMAND }}
+          DUBBING_STT_MODEL: large-v3
+          DUBBING_STT_PROVIDER: local-whisper
+        run: python real_provider_runner.py whisper --audio "$MEDIA_PATH" --work provider-validation-work > validation-artifacts/validation.json
+      - name: Preflight XTTS-v2 inputs
+        if: inputs.provider == 'xtts-v2'
+        env:
+          TEXT_PATH: ${{ inputs.text_path }}
+          REFERENCE_PATH: ${{ inputs.reference_path }}
+          OUTPUT_PATH: ${{ inputs.output_path }}
+        run: |
+          test -n "$TEXT_PATH" || { echo 'text_path is required for xtts-v2'; exit 2; }
+          test -f "$TEXT_PATH" || { echo "XTTS text file does not exist: $TEXT_PATH"; exit 2; }
+          test -n "$REFERENCE_PATH" || { echo 'reference_path is required for xtts-v2'; exit 2; }
+          test -f "$REFERENCE_PATH" || { echo "XTTS reference audio does not exist: $REFERENCE_PATH"; exit 2; }
+          test -n "$OUTPUT_PATH" || { echo 'output_path is required for xtts-v2'; exit 2; }
+          test -n "$XTTS_V2_TTS_COMMAND" || { echo 'XTTS_V2_TTS_COMMAND must be configured on the selected runner'; exit 2; }
+          mkdir -p validation-artifacts provider-validation-work "$(dirname "$OUTPUT_PATH")"
+      - name: Run XTTS-v2 production profile
+        if: inputs.provider == 'xtts-v2'
+        env:
+          TEXT_PATH: ${{ inputs.text_path }}
+          REFERENCE_PATH: ${{ inputs.reference_path }}
+          OUTPUT_PATH: ${{ inputs.output_path }}
+          LANGUAGE: ${{ inputs.language }}
+          XTTS_V2_TTS_COMMAND: ${{ secrets.XTTS_V2_TTS_COMMAND }}
+          REQUIRE_REFERENCE_VOICE_CLONING: 'true'
+        run: python real_provider_runner.py xtts-v2 --text "$TEXT_PATH" --reference "$REFERENCE_PATH" --output "$OUTPUT_PATH" --language "$LANGUAGE" > validation-artifacts/validation.json
       - name: Preflight Demucs input
         if: inputs.provider == 'demucs'
         env:
