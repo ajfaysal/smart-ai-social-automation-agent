@@ -41,3 +41,36 @@ def test_artifact_validation_rejects_wrong_suffix(tmp_path: Path):
     ok, reason = validate_artifact(artifact, suffix=".mp4")
     assert ok is False
     assert reason == "artifact_suffix_mismatch:.mov"
+
+
+def test_provider_audit_contexts_are_isolated():
+    from contextvars import copy_context
+
+    reset_provider_executions()
+    finalize("parent", configured=True, attempted=False)
+
+    child = copy_context()
+
+    def run_child():
+        reset_provider_executions()
+        finalize("child", configured=True, attempted=False)
+        return snapshot()
+
+    child_snapshot = child.run(run_child)
+
+    assert child_snapshot["child"]["provider"] == "child"
+    assert child_snapshot["child"]["state"] == "configured"
+    assert child_snapshot["child"]["applied"] is False
+    assert snapshot()["parent"]["provider"] == "parent"
+    assert "child" not in snapshot()
+
+
+def test_record_keeps_existing_provider_records_in_current_context():
+    reset_provider_executions()
+    finalize("first", configured=True, attempted=False)
+    finalize("second", configured=True, attempted=False)
+
+    current = snapshot()
+    assert set(current) == {"first", "second"}
+    assert current["first"]["provider"] == "first"
+    assert current["second"]["provider"] == "second"

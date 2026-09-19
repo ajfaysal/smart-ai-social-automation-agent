@@ -1,31 +1,43 @@
 """Runtime registry for auditable optional provider execution.
 
-The registry is process-local and intentionally lightweight. Providers register
-only after an explicit execution attempt; success is accepted only when the
+The registry is process-local but request-scoped via ContextVar so concurrent
+dubbing jobs cannot mix provider execution records. Providers register only
+after an explicit execution attempt; success is accepted only when the
 expected artifact validator passes. It is safe in credential-free CI.
 """
 from __future__ import annotations
 
 import json
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
 from provider_reliability import ProviderExecution, ProviderState
 
-_EXECUTIONS: dict[str, ProviderExecution] = {}
+
+_EXECUTIONS: ContextVar[dict[str, ProviderExecution]] = ContextVar(
+    "provider_executions",
+    default={},
+)
 
 
 def reset_provider_executions() -> None:
-    _EXECUTIONS.clear()
+    """Start a fresh provider audit scope for the current execution context."""
+    _EXECUTIONS.set({})
 
 
 def record(execution: ProviderExecution) -> ProviderExecution:
-    _EXECUTIONS[execution.provider] = execution
+    executions = dict(_EXECUTIONS.get())
+    executions[execution.provider] = execution
+    _EXECUTIONS.set(executions)
     return execution
 
 
 def snapshot() -> dict[str, dict[str, Any]]:
-    return {name: execution.to_manifest() for name, execution in _EXECUTIONS.items()}
+    return {
+        name: execution.to_manifest()
+        for name, execution in _EXECUTIONS.get().items()
+    }
 
 
 def validate_artifact(path: Path, *, min_bytes: int = 1, suffix: str | None = None) -> tuple[bool, str]:
