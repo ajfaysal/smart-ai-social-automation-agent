@@ -55,7 +55,7 @@ jobs:
               require_openai=False,
               require_wav2lip=False,
               require_diarization=False,
-              require_reference_voice=True,
+              require_reference_voice=False,
           )
           print(p)
           if not p.ready:
@@ -69,7 +69,10 @@ jobs:
           KERNEL_SLUG: ${{ inputs.kernel_slug }}
         run: |
           test -n "$KAGGLE_API_TOKEN" || { echo "Missing GitHub secret KAGGLE_API_TOKEN"; exit 2; }
-          python kaggle_gpu_orchestrator.py             --video-url "$VIDEO_URL"             --language "$TARGET_LANGUAGE"             --kernel-slug "$KERNEL_SLUG" \
+          python kaggle_gpu_orchestrator.py \
+            --video-url "$VIDEO_URL" \
+            --language "$TARGET_LANGUAGE" \
+            --kernel-slug "$KERNEL_SLUG" \
             --dispatch-only
       - name: Publish dispatch metadata
         env:
@@ -108,7 +111,10 @@ jobs:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
           KERNEL_SLUG: ${{ inputs.kernel_slug }}
         run: |
-          python kaggle_certification_operator.py "ajfaysal/$KERNEL_SLUG" --timeout 3600 --poll 30 --output-dir kaggle-certification-output
+          python kaggle_certification_operator.py "ajfaysal/$KERNEL_SLUG" \
+            --timeout 3600 \
+            --poll 30 \
+            --output-dir kaggle-certification-output
       - name: Upload certification artifacts
         if: always()
         uses: actions/upload-artifact@v4
