@@ -13,10 +13,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from kaggle_full_pipeline import build_notebook
-from real_run_preflight import build_preflight
-
 DEFAULT_VIDEO_URL = "https://drive.google.com/file/d/1brOpsZOsoM2oWijxbYyHKDlDrsQTnO7-/view?usp=drivesdk"
+DEFAULT_KAGGLE_OWNER = "mdfaysalhowlader"
 
 
 def _token() -> str:
@@ -72,8 +70,11 @@ def main() -> int:
         )
         kernel_slug = args.kernel_slug or f"drama-dubbing-chinese-{args.language.lower()}"
         kernel_title = " ".join(part.capitalize() for part in kernel_slug.split("-"))
+        kernel_owner = (os.getenv("KAGGLE_USERNAME") or DEFAULT_KAGGLE_OWNER).strip()
+        if not kernel_owner or "/" in kernel_owner:
+            raise RuntimeError("KAGGLE_USERNAME must be a Kaggle account username, without slashes")
         metadata = {
-            "id": f"ajfaysal/{kernel_slug}",
+            "id": f"{kernel_owner}/{kernel_slug}",
             "title": kernel_title,
             "code_file": "kaggle_full_pipeline.ipynb",
             "language": "python",
