@@ -261,7 +261,8 @@ final_video_sha256 = hashlib.sha256(output.read_bytes()).hexdigest() if output.i
     'generated_contract_version': 2,\n})\n(ARTIFACTS / 'cloud-provider-certification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
 print(json.dumps(report, ensure_ascii=False, indent=2))
 """
-    source = source.replace("__REPORT_HELPER__", inspect.getsource(build_evidence_report))\n    source = source.replace("__REF__", repr(ref)).replace("__REPO__", repo).replace("__VIDEO_URL__", repr(video_url)).replace("__LANGUAGE__", repr(language))
+    source = source.replace("__REPORT_HELPER__", inspect.getsource(build_evidence_report))
+    source = source.replace("__REF__", repr(ref)).replace("__REPO__", repo).replace("__VIDEO_URL__", repr(video_url)).replace("__LANGUAGE__", repr(language))
     return {
         "cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": source.splitlines(True)}],
         "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}},
