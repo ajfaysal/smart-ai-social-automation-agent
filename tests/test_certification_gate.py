@@ -88,3 +88,23 @@ def test_certification_requires_reference_qc(monkeypatch, tmp_path):
     monkeypatch.setattr(gate, "_probe", lambda p: {"duration_seconds": 10.0, "streams": ["audio", "video"]})
     with pytest.raises(RuntimeError, match="reference voice QC"):
         gate.certify(video, manifest(segments=[{"character": "C1", "voice": "nova", "reference_audio": "/runtime/C1.wav", "reference_qc": {"status": "FAILED"}, "reference_selection_score": [2.0, 0.9, -1.0], "timing_lock": True}]), target_language="Bangla")
+
+
+def test_certification_fails_when_segment_routing_not_succeeded(monkeypatch, tmp_path):
+    video = tmp_path / "final.mp4"
+    video.write_bytes(b"real")
+    monkeypatch.setattr(gate, "_probe", lambda p: {"duration_seconds": 10.0, "streams": ["audio", "video"]})
+    segments = manifest()["segments"]
+    segments[0] = dict(segments[0], routing_status="UNAVAILABLE")
+    with pytest.raises(RuntimeError, match="speaker routing"):
+        gate.certify(video, manifest(segments=segments), target_language="Bangla")
+
+
+def test_certification_fails_when_provider_artifact_was_not_validated(monkeypatch, tmp_path):
+    video = tmp_path / "final.mp4"
+    video.write_bytes(b"real")
+    monkeypatch.setattr(gate, "_probe", lambda p: {"duration_seconds": 10.0, "streams": ["audio", "video"]})
+    providers = manifest()["provider_execution"]
+    providers["tts"] = dict(providers["tts"], reason="provider_ok")
+    with pytest.raises(RuntimeError, match="strictly succeeded/applied"):
+        gate.certify(video, manifest(provider_execution=providers), target_language="Bangla")
