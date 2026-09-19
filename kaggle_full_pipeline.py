@@ -192,6 +192,9 @@ try:
         manifest,
         source_language='Chinese (Simplified)',
         target_language=__LANGUAGE__,
+        expected_stt_provider='local-whisper',
+        expected_tts_provider='xtts-v2',
+        require_reference_voice_cloning=True,
     )
 except Exception as exc:
     certification = {
