@@ -16,7 +16,10 @@ def test_full_notebook_is_secret_free_and_uses_canonical_pipeline():
     assert "UserSecretsClient" in source
     assert "OPENAI_API_KEY" in source
     assert "REQUIRE_REFERENCE_VOICE_CLONING" in source
-    assert "FISH_SPEECH_TTS_COMMAND" in source
+    assert "WHISPER_LOCAL_COMMAND" in source
+    assert "XTTS_V2_TTS_COMMAND" in source
+    assert "DUBBING_STT_PROVIDER" in source
+    assert "VOICE_ENGINE_PREFERENCE" in source
     assert "WAV2LIP_CHECKPOINT_URL" in source
     assert "WAV2LIP_S3FD_URL" in source
     assert "dub_video(" in source
@@ -36,7 +39,8 @@ def test_bangla_notebook_uses_neural_multicharacter_voice_pool_and_replacement_m
         "Bangla",
     )
     source = "".join(notebook["cells"][0]["source"])
-    assert "edge-tts" in source
+    assert "XTTS_V2_TTS_COMMAND" in source
+    assert "DUBBING_STT_MODEL" in source
     assert "synthesize_bangla" in source
     assert "natural_bangla_tts" in source
     assert "acting_directive=None" in source
