@@ -12,6 +12,7 @@ def build_segment_routes(routed_segments, routes):
         route = routes.get(sid) if sid else None
         row = dict(item)
         row["character_id"] = route.character_id if route else None
+        row["gender_hint"] = route.gender_hint if route else None
         row["voice_profile"] = route.voice_profile if route else None
         row["reference_audio"] = route.reference_audio if route else None
         row["reference_qc"] = route.reference_qc if route else None
