@@ -70,9 +70,11 @@ def main() -> int:
         (root / "kaggle_full_pipeline.ipynb").write_text(
             json.dumps(notebook, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        kernel_slug = args.kernel_slug or f"drama-dubbing-chinese-{args.language.lower()}"
+        kernel_title = " ".join(part.capitalize() for part in kernel_slug.split("-"))
         metadata = {
-            "id": f"ajfaysal/{args.kernel_slug or f'drama-dubbing-chinese-{args.language.lower()}' }",
-            "title": f"Chinese Drama → {args.language} Dubbing",
+            "id": f"ajfaysal/{kernel_slug}",
+            "title": kernel_title,
             "code_file": "kaggle_full_pipeline.ipynb",
             "language": "python",
             "kernel_type": "notebook",
