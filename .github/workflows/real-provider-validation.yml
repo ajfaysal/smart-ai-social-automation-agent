@@ -13,6 +13,11 @@ on:
           - demucs
           - mediapipe
           - wav2lip
+      runner_label:
+        description: GitHub runner label with provisioned provider dependencies/media
+        required: true
+        default: ubuntu-latest
+        type: string
       media_path:
         description: Runner-local media path (audio for Demucs, image for MediaPipe, video for Wav2Lip)
         required: false
@@ -31,8 +36,12 @@ on:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner_label }}
     steps:
+      - name: Record runner selection
+        run: |
+          mkdir -p validation-artifacts
+          printf 'runner_label=%s\nprovider=%s\n' '${{ inputs.runner_label }}' '${{ inputs.provider }}' > validation-artifacts/runner-profile.txt
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
