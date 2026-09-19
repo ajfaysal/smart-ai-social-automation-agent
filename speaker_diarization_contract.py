@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Iterable
 
+from bangla_voice_routing import BanglaVoiceResolver
 from reference_voice_qc import ReferenceVoiceQC
 from speaker_identity import CharacterIdentity, SpeakerTurn, normalize_speaker_id
 
@@ -17,6 +18,7 @@ class SpeakerVoiceRoute:
     reference_qc: ReferenceVoiceQC | None
     reference_selection_score: tuple[float, float, float] | None
     confidence: float
+    voice_source: str = "native_bangla"
 
 
 def build_voice_routes(
@@ -25,22 +27,28 @@ def build_voice_routes(
     voice_profiles: dict[str, str] | None = None,
     minimum_confidence: float = 0.70,
 ) -> dict[str, SpeakerVoiceRoute]:
-    """Build a deterministic speaker->character->voice handoff with QC evidence."""
-    voice_profiles = voice_profiles or {}
+    """Build deterministic speaker->character->voice routing with reference fallback."""
+    resolver = BanglaVoiceResolver(voice_profiles)
     active = {normalize_speaker_id(t.speaker_id) for t in turns}
     routes: dict[str, SpeakerVoiceRoute] = {}
     for sid in sorted(active):
         identity = identities.get(sid)
         if identity is None or identity.confidence < minimum_confidence:
             continue
+        profile, source = resolver.resolve(
+            identity.character_id,
+            identity.gender_hint,
+            identity.reference_audio,
+        )
         routes[sid] = SpeakerVoiceRoute(
             speaker_id=sid,
             character_id=identity.character_id,
-            voice_profile=voice_profiles.get(identity.character_id),
+            voice_profile=profile,
             reference_audio=identity.reference_audio,
             reference_qc=identity.reference_qc,
             reference_selection_score=identity.reference_selection_score,
             confidence=identity.confidence,
+            voice_source=source,
         )
     return routes
 
