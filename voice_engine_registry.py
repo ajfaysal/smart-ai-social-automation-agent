@@ -34,6 +34,7 @@ VOICE_ENGINES = {
     "fish-speech": VoiceEngine("fish-speech", "FISH_SPEECH_TTS_COMMAND", True, True),
     "gpt-sovits": VoiceEngine("gpt-sovits", "GPT_SOVITS_TTS_COMMAND", True, True),
     "openvoice": VoiceEngine("openvoice", "OPENVOICE_TTS_COMMAND", True, True),
+    "xtts-v2": VoiceEngine("xtts-v2", "XTTS_V2_TTS_COMMAND", True, True),
     "edge-neural": VoiceEngine("edge-neural", "", True, False),
 }
 

@@ -75,3 +75,28 @@ Validation artifacts include the JSON report and the provider work/output direct
 ## Certification boundary
 
 This validation profile is not V1 Chinese→Bangla/English/Hindi certification by itself. Certification additionally requires the real GPU pipeline, successful speaker identity/routing, applied lip-sync where required, final QC, the complete execution manifest, and the certification bundle described in the repository's Kaggle certification documentation.
+
+
+## Recommended production STT/TTS profiles
+
+For Chinese drama dubbing, the preferred open-source benchmark profile is:
+
+- **STT:** Whisper large-v3 on a provisioned runner.
+- **TTS:** XTTS-v2 with one validated reference recording per character.
+- Model weights and reference recordings remain outside git.
+
+### Local Whisper adapter
+
+Set `DUBBING_STT_PROVIDER=local-whisper` and provide `WHISPER_LOCAL_COMMAND`. The command receives:
+
+- `{audio}` — source WAV path
+- `{output}` — required verbose-JSON output path
+- `{model}` — defaults to `large-v3`
+
+The JSON must contain a `segments` array with timestamped dialogue.
+
+### XTTS-v2 adapter
+
+Set `XTTS_V2_TTS_COMMAND` to a command template accepting `{text}`, `{output}`, `{reference}`, `{character}`, `{acting_directive}`, and `{language}`. Enable reference cloning with `REQUIRE_REFERENCE_VOICE_CLONING=true`. The provider is audited as cross-lingual and reference-capable only after a non-empty audio artifact passes TTS validation.
+
+These adapters are intentionally external-command based so large model weights, CUDA environments, and speaker reference media stay on the provisioned runner.
