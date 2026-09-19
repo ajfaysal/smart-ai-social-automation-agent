@@ -39,6 +39,29 @@ def api_request(method,url,**kwargs):
     return requests.request(method,url,headers=headers,timeout=300,**kwargs)
 
 def transcribe(audio_path):
+    """Transcribe with the configured STT backend.
+
+    The local backend is intentionally command-adapter based so Whisper-large-v3
+    weights remain on the provisioned runner rather than in git or CI. The
+    command must write a verbose-JSON transcript to {output}.
+    """
+    provider = os.getenv("DUBBING_STT_PROVIDER", "openai").strip().lower()
+    if provider in {"local", "local-whisper", "whisper-large-v3"}:
+        command = os.getenv("WHISPER_LOCAL_COMMAND", "").strip()
+        if not command:
+            raise RuntimeError("DUBBING_STT_PROVIDER requests local Whisper, but WHISPER_LOCAL_COMMAND is not configured.")
+        out = audio_path.with_suffix(".whisper.json")
+        rendered = command.format(audio=str(audio_path), output=str(out), model=os.getenv("DUBBING_STT_MODEL","large-v3"))
+        subprocess.run(rendered, shell=True, check=True, capture_output=True, text=True)
+        if not out.exists() or out.stat().st_size < 16:
+            raise RuntimeError("Local Whisper provider did not produce a valid transcript artifact.")
+        try:
+            result = json.loads(out.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Local Whisper transcript artifact is not valid JSON.") from exc
+        if not isinstance(result, dict) or not isinstance(result.get("segments"), list):
+            raise RuntimeError("Local Whisper transcript must contain a segments array.")
+        return result
     with open(audio_path,"rb") as audio:
         r=api_request("POST","https://api.openai.com/v1/audio/transcriptions",files={"file":(audio_path.name,audio,"audio/mpeg")},data={"model":os.getenv("DUBBING_STT_MODEL","whisper-1"),"response_format":"verbose_json"})
     if not r.ok: raise RuntimeError(r.text)
