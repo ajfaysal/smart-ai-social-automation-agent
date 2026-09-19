@@ -81,4 +81,5 @@ jobs:
           name: real-provider-validation-${{ inputs.provider }}
           path: |
             validation-artifacts/
-          if-no-files-found: ignore
+            provider-validation-work/
+          if-no-files-found: error
