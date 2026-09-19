@@ -6,6 +6,8 @@ outside the repository. Standard CI must continue using deterministic mocks.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -94,32 +96,34 @@ def main() -> int:
     args = parser.parse_args()
     args.work.mkdir(parents=True, exist_ok=True)
 
-    if args.provider == "whisper":
-        if not args.audio:
-            parser.error("whisper requires --audio")
-        result = run_whisper(args.audio, args.work)
-    elif args.provider == "xtts-v2":
-        if not args.text or not args.reference or not args.output:
-            parser.error("xtts-v2 requires --text, --reference and --output")
-        result = run_xtts(args.text, args.reference, args.output, args.language)
-    elif args.provider == "demucs":
-        if not args.audio:
-            parser.error("demucs requires --audio")
-        result = run_demucs(args.audio, args.work)
-    elif args.provider == "mediapipe":
-        if not args.image:
-            parser.error("mediapipe requires --image")
-        os.environ.setdefault("MOUTH_LANDMARK_PROVIDER", "mediapipe")
-        result = run_mediapipe(args.image)
-    else:
-        if not args.video or not args.audio or not args.output:
-            parser.error("wav2lip requires --video, --audio and --output")
-        os.environ.setdefault("LIPSYNC_PROVIDER", "wav2lip")
-        result = run_wav2lip(args.video, args.audio, args.output)
+    with contextlib.redirect_stdout(io.StringIO()):
+        if args.provider == "whisper":
+            if not args.audio:
+                parser.error("whisper requires --audio")
+            result = run_whisper(args.audio, args.work)
+        elif args.provider == "xtts-v2":
+            if not args.text or not args.reference or not args.output:
+                parser.error("xtts-v2 requires --text, --reference and --output")
+            result = run_xtts(args.text, args.reference, args.output, args.language)
+        elif args.provider == "demucs":
+            if not args.audio:
+                parser.error("demucs requires --audio")
+            result = run_demucs(args.audio, args.work)
+        elif args.provider == "mediapipe":
+            if not args.image:
+                parser.error("mediapipe requires --image")
+            os.environ.setdefault("MOUTH_LANDMARK_PROVIDER", "mediapipe")
+            result = run_mediapipe(args.image)
+        else:
+            if not args.video or not args.audio or not args.output:
+                parser.error("wav2lip requires --video, --audio and --output")
+            os.environ.setdefault("LIPSYNC_PROVIDER", "wav2lip")
+            result = run_wav2lip(args.video, args.audio, args.output)
 
-    valid, reason = validate_provider_snapshot(result["provider_execution"])
-    if not valid:
-        raise RuntimeError(f"Provider audit validation failed: {reason}")
+        valid, reason = validate_provider_snapshot(result["provider_execution"])
+        if not valid:
+            raise RuntimeError(f"Provider audit validation failed: {reason}")
+
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
