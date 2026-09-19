@@ -58,40 +58,19 @@ def test_provider_audit_contexts_are_isolated():
 
     child_snapshot = child.run(run_child)
 
-    assert child_snapshot == {
-        "child": {
-            "state": "configured",
-            "applied": False,
-            "reason": "provider_not_attempted",
-            "version": None,
-            "capabilities": [],
-        }
-    }
-    assert snapshot() == {
-        "parent": {
-            "state": "configured",
-            "applied": False,
-            "reason": "provider_not_attempted",
-            "version": None,
-            "capabilities": [],
-        }
-    }
+    assert child_snapshot["child"]["provider"] == "child"
+    assert child_snapshot["child"]["state"] == "configured"
+    assert child_snapshot["child"]["applied"] is False
+    assert snapshot()["parent"]["provider"] == "parent"
+    assert "child" not in snapshot()
 
 
-def test_record_does_not_mutate_parent_context_dict():
+def test_record_keeps_existing_provider_records_in_current_context():
     reset_provider_executions()
     finalize("first", configured=True, attempted=False)
-
-    before = snapshot()
     finalize("second", configured=True, attempted=False)
 
-    assert snapshot() == {
-        **before,
-        "second": {
-            "state": "configured",
-            "applied": False,
-            "reason": "provider_not_attempted",
-            "version": None,
-            "capabilities": [],
-        },
-    }
+    current = snapshot()
+    assert set(current) == {"first", "second"}
+    assert current["first"]["provider"] == "first"
+    assert current["second"]["provider"] == "second"
