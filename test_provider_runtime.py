@@ -41,3 +41,57 @@ def test_artifact_validation_rejects_wrong_suffix(tmp_path: Path):
     ok, reason = validate_artifact(artifact, suffix=".mp4")
     assert ok is False
     assert reason == "artifact_suffix_mismatch:.mov"
+
+
+def test_provider_audit_contexts_are_isolated():
+    from contextvars import copy_context
+
+    reset_provider_executions()
+    finalize("parent", configured=True, attempted=False)
+
+    child = copy_context()
+
+    def run_child():
+        reset_provider_executions()
+        finalize("child", configured=True, attempted=False)
+        return snapshot()
+
+    child_snapshot = child.run(run_child)
+
+    assert child_snapshot == {
+        "child": {
+            "state": "configured",
+            "applied": False,
+            "reason": "provider_not_attempted",
+            "version": None,
+            "capabilities": [],
+        }
+    }
+    assert snapshot() == {
+        "parent": {
+            "state": "configured",
+            "applied": False,
+            "reason": "provider_not_attempted",
+            "version": None,
+            "capabilities": [],
+        }
+    }
+
+
+def test_record_does_not_mutate_parent_context_dict():
+    reset_provider_executions()
+    finalize("first", configured=True, attempted=False)
+
+    before = snapshot()
+    finalize("second", configured=True, attempted=False)
+
+    assert snapshot() == {
+        **before,
+        "second": {
+            "state": "configured",
+            "applied": False,
+            "reason": "provider_not_attempted",
+            "version": None,
+            "capabilities": [],
+        },
+    }
