@@ -51,9 +51,13 @@ on:
         default: bn
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 120
     steps:
       - name: Record runner selection
         run: |
@@ -162,6 +166,12 @@ jobs:
           OUTPUT_PATH: ${{ inputs.output_path }}
           LIPSYNC_PROVIDER: wav2lip
         run: python real_provider_runner.py wav2lip --video "$VIDEO_PATH" --audio "$AUDIO_PATH" --output "$OUTPUT_PATH" > validation-artifacts/validation.json
+      - name: Validate machine-readable provider report
+        if: inputs.provider != 'dry-run'
+        run: |
+          test -s validation-artifacts/validation.json || { echo 'Provider validation did not produce validation.json'; exit 2; }
+          python -m json.tool validation-artifacts/validation.json >/dev/null
+          grep -q '"provider_execution"' validation-artifacts/validation.json || { echo 'Provider validation report lacks provider_execution evidence'; exit 2; }
       - name: Upload validation report
         if: always()
         uses: actions/upload-artifact@v4

@@ -36,6 +36,17 @@ Character identity is separated from the TTS provider. A character can be assign
 
 The real certification path runs on a private Kaggle GPU kernel. Provider credentials and model URLs stay in Kaggle Secrets; they are never committed to Git or duplicated into GitHub workflow variables.
 
+### Manual provider validation workflow
+
+For isolated provider-level validation, use **Actions → Real Provider Validation → Run workflow**. Select a provisioned runner label and one provider profile (`demucs`, `mediapipe`, `wav2lip`, `whisper`, or `xtts-v2`). The runner must already contain the required provider runtime, model weights, and test media; heavyweight assets are never downloaded by default CI.
+
+- Whisper requires runner-local audio plus the `WHISPER_LOCAL_COMMAND` secret and validates the large-v3 contract.
+- XTTS-v2 requires runner-local text, reference audio, output path, and `XTTS_V2_TTS_COMMAND`; reference voice cloning is mandatory.
+- Demucs, MediaPipe, and Wav2Lip require the corresponding runner-local media and configured provider runtime.
+- Successful execution must produce a machine-readable `validation.json` containing `provider_execution`; malformed or missing reports fail closed.
+- The workflow uploads `validation-artifacts/` and `provider-validation-work/` even when validation fails.
+
+This workflow proves provider execution only when the selected provisioned runner actually runs the model-backed provider and produces validated artifacts. A dry-run or dispatch event is not certification.
 ### Dispatch
 
 Use the GitHub Actions workflow: **Actions → Kaggle Real Certification Dispatch → Run workflow**.
