@@ -2,12 +2,66 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 from pathlib import Path
 
 
+def build_evidence_report(certification: dict, manifest_evidence: dict, artifact_paths: dict, output_sha256: str | None, *, identity_payload: dict, language: str, mood, lip) -> dict:
+    """Build only claims proven by certification and existing artifacts."""
+    certified = certification.get("certified") is True
+
+    def existing_path(key: str):
+        value = artifact_paths.get(key)
+        if not value:
+            return None
+        path = Path(value)
+        return str(path) if path.is_file() else None
+
+    report = {
+        "status": "certified" if certified else "failed_closed",
+        "certification": certification,
+        "output": existing_path("output"),
+        "manifest": existing_path("manifest"),
+        "subtitle": existing_path("subtitle"),
+        "text_cleanup_report": existing_path("text_cleanup_report"),
+        "speaker_identity_manifest": existing_path("speaker_identity_manifest"),
+        "speaker_routing_manifest": existing_path("speaker_routing_manifest"),
+        "output_sha256": output_sha256 if certified else None,
+        "manifest_filename": Path(artifact_paths["manifest"]).name if existing_path("manifest") else None,
+    }
+    if not certified:
+        for key in (
+            "speaker_identity_status", "speaker_count", "mood", "lip_sync", "voice_engine",
+            "character_voice_profiles", "audio_mix", "original_dialogue_removed",
+            "original_music_removed", "source_text_cleanup", "speaker_routing",
+            "stt_provider", "stt_model", "tts_provider",
+        ):
+            report[key] = "unknown"
+        return report
+
+    music = manifest_evidence.get("music") or {}
+    report.update({
+        "speaker_identity_status": manifest_evidence.get("speaker_identity_status", identity_payload.get("identity", {}).get("status", "unknown")),
+        "speaker_count": manifest_evidence.get("speaker_count", identity_payload.get("identity", {}).get("speaker_count", "unknown")),
+        "mood": manifest_evidence.get("mood", mood),
+        "lip_sync": (manifest_evidence.get("lip_sync") or {}).get("applied", lip),
+        "voice_engine": manifest_evidence.get("voice_engine", "unknown"),
+        "character_voice_profiles": manifest_evidence.get("character_voice_profiles", "unknown"),
+        "audio_mix": manifest_evidence.get("audio_mix", "unknown"),
+        "original_dialogue_removed": manifest_evidence.get("original_dialogue_in_final") is False,
+        "original_music_removed": music.get("enabled") is False,
+        "source_text_cleanup": manifest_evidence.get("source_text_cleanup", "unknown"),
+        "speaker_routing": manifest_evidence.get("speaker_routing", "unknown"),
+        "stt_provider": manifest_evidence.get("stt_provider", "unknown"),
+        "stt_model": manifest_evidence.get("stt_model", "unknown"),
+        "tts_provider": manifest_evidence.get("tts_provider", "unknown"),
+    })
+    return report
+
+
 def build_notebook(video_url: str, repo: str, ref: str, language: str = "Bangla") -> dict:
-    source = """import json, os, shutil, subprocess
+    source = """__REPORT_HELPER__\nimport json, os, shutil, subprocess
 from pathlib import Path
 
 REPO = Path('/kaggle/working/repo')
@@ -15,6 +69,7 @@ INPUT = REPO / 'validation-input' / 'source.mp4'
 CLEAN_VIDEO = REPO / 'validation-input' / 'cleaned-video.mp4'
 CLEAN_REPORT = REPO / 'validation-artifacts' / 'text-cleanup.json'
 ARTIFACTS = Path('/kaggle/working/final-artifacts')
+REPLACEMENT_AUDIO_MIX_POLICY = 'replacement-dialogue-only-no-original-music'
 ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
 try:
@@ -203,35 +258,11 @@ except Exception as exc:
 certification_path.write_text(json.dumps(certification, ensure_ascii=False, indent=2), encoding='utf-8')
 
 import hashlib
-final_video_sha256 = hashlib.sha256(output.read_bytes()).hexdigest()
-report = {
-    'status': 'certified' if certification.get('certified') is True else 'failed_closed',
-    'certification': certification,
-    'output': str(ARTIFACTS / output.name),
-    'output_sha256': final_video_sha256,
-    'manifest_filename': manifest.name,
-    'manifest': str(ARTIFACTS / manifest.name),
-    'subtitle': str(ARTIFACTS / subtitle.name),
-    'text_cleanup_report': str(ARTIFACTS / CLEAN_REPORT.name),
-    'speaker_identity_manifest': str(ARTIFACTS / SPEAKER_MANIFEST.name),
-    'speaker_routing_manifest': str(ARTIFACTS / ROUTING_MANIFEST.name),
-    'speaker_identity_status': identity_payload['identity'].get('status'),
-    'speaker_count': identity_payload['identity'].get('speaker_count', 0),
-    'mood': mood,
-    'lip_sync': lip,
-    'voice_engine': 'xtts-v2-reference-cloned' if __LANGUAGE__ == 'Bangla' else 'canonical-openai',
-    'character_voice_profiles': BANGLA_CHARACTER_VOICE_POOL if __LANGUAGE__ == 'Bangla' else [],
-    'audio_mix': 'replacement-dialogue-only-no-original-music',
-    'original_dialogue_removed': True,
-    'original_music_removed': True,
-    'source_text_cleanup': 'ocr-guided-easyocr-opencv-inpaint',
-    'speaker_routing': 'diarized-speaker-to-character-to-voice-profile/reference-audio',
-    'stt_provider': 'whisper-large-v3',
-    'tts_provider': 'xtts-v2',
-}
-(ARTIFACTS / 'cloud-provider-certification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+final_video_sha256 = hashlib.sha256(output.read_bytes()).hexdigest() if output.is_file() else None\nmanifest_evidence = {}\nif manifest.is_file():\n    try:\n        manifest_evidence = json.loads(manifest.read_text(encoding="utf-8"))\n    except Exception:\n        manifest_evidence = {}\nreport = build_evidence_report(\n    certification,\n    manifest_evidence,\n    {\n        "output": ARTIFACTS / output.name,\n        "manifest": ARTIFACTS / manifest.name,\n        "subtitle": ARTIFACTS / subtitle.name,\n        "text_cleanup_report": ARTIFACTS / CLEAN_REPORT.name,\n        "speaker_identity_manifest": ARTIFACTS / SPEAKER_MANIFEST.name,\n        "speaker_routing_manifest": ARTIFACTS / ROUTING_MANIFEST.name,\n    },\n    final_video_sha256,\n    identity_payload=identity_payload,\n    language=__LANGUAGE__,\n    mood=mood,\n    lip=lip,\n)\nreport.update({
+    'generated_contract_version': 2,\n})\n(ARTIFACTS / 'cloud-provider-certification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
 print(json.dumps(report, ensure_ascii=False, indent=2))
 """
+    source = source.replace("__REPORT_HELPER__", inspect.getsource(build_evidence_report))
     source = source.replace("__REF__", repr(ref)).replace("__REPO__", repo).replace("__VIDEO_URL__", repr(video_url)).replace("__LANGUAGE__", repr(language))
     return {
         "cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": source.splitlines(True)}],
