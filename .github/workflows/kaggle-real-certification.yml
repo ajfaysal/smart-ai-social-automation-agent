@@ -62,6 +62,7 @@ jobs:
               raise SystemExit(2)
           PY
       - name: Dispatch private Kaggle GPU kernel
+        id: dispatch
         env:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
           VIDEO_URL: ${{ inputs.video_url }}
@@ -71,7 +72,7 @@ jobs:
           set +e
           echo "Kaggle CLI version:"
           python -m kaggle --version
-          echo "Dispatch metadata: kernel=ajfaysal/$KERNEL_SLUG language=$TARGET_LANGUAGE"
+          echo "Dispatch metadata: kernel-slug=$KERNEL_SLUG language=$TARGET_LANGUAGE"
           echo "KAGGLE_API_TOKEN is present: $([ -n "$KAGGLE_API_TOKEN" ] && echo yes || echo no)"
           echo "Running dispatch command with stdout/stderr capture..."
           python kaggle_gpu_orchestrator.py             --video-url "$VIDEO_URL"             --language "$TARGET_LANGUAGE"             --kernel-slug "$KERNEL_SLUG"             --dispatch-only             >"$RUNNER_TEMP/kaggle-dispatch.log" 2>&1
@@ -83,11 +84,28 @@ jobs:
             echo "Kaggle dispatch failed with exit code $status"
             exit "$status"
           fi
+
+          kernel_url="$(grep -Eo 'https://www\.kaggle\.com/code/[^[:space:]]+/[^[:space:]]+' "$RUNNER_TEMP/kaggle-dispatch.log" | tail -n 1)"
+          if [ -z "$kernel_url" ]; then
+            echo "Could not determine the actual Kaggle kernel URL from push output"
+            exit 3
+          fi
+          kernel_ref="$(printf '%s' "$kernel_url" | sed -E 's#https://www\.kaggle\.com/code/([^/]+)/([^/]+).*#\1/\2#')"
+          case "$kernel_ref" in
+            */"$KERNEL_SLUG") ;;
+            *)
+              echo "Kaggle push returned unexpected kernel ref: $kernel_ref"
+              exit 4
+              ;;
+          esac
+          echo "Actual Kaggle kernel ref: $kernel_ref"
+          echo "kernel_ref=$kernel_ref" >> "$GITHUB_OUTPUT"
       - name: Publish dispatch metadata
         env:
           VIDEO_URL: ${{ inputs.video_url }}
           TARGET_LANGUAGE: ${{ inputs.language }}
           KERNEL_SLUG: ${{ inputs.kernel_slug }}
+          KERNEL_REF: ${{ steps.dispatch.outputs.kernel_ref }}
         run: |
           mkdir -p validation-artifacts
           python - <<'PY'
@@ -95,7 +113,7 @@ jobs:
           from pathlib import Path
 
           slug = os.environ["KERNEL_SLUG"]
-          kernel_ref = f"ajfaysal/{slug}"
+          kernel_ref = os.environ["KERNEL_REF"]
           Path("validation-artifacts/kaggle-dispatch.json").write_text(
               json.dumps({
                   "status": "submitted",
@@ -118,9 +136,9 @@ jobs:
       - name: Wait for Kaggle certification
         env:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
-          KERNEL_SLUG: ${{ inputs.kernel_slug }}
+          KERNEL_REF: ${{ steps.dispatch.outputs.kernel_ref }}
         run: |
-          python kaggle_certification_operator.py "ajfaysal/$KERNEL_SLUG"             --timeout 3600             --poll 30             --output-dir kaggle-certification-output
+          python kaggle_certification_operator.py "$KERNEL_REF"             --timeout 3600             --poll 30             --output-dir kaggle-certification-output
       - name: Upload certification artifacts
         if: always()
         uses: actions/upload-artifact@v4
