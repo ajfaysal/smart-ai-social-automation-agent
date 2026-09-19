@@ -1,7 +1,7 @@
 import json
 
 from audio_policy import AudioPolicy, V1_AUDIO_POLICY, describe_policy, validate_policy
-from kaggle_full_pipeline import build_notebook
+from kaggle_full_pipeline import build_evidence_report, build_notebook
 
 
 def test_full_notebook_is_secret_free_and_uses_canonical_pipeline():
@@ -75,3 +75,86 @@ def test_audio_policy_rejects_dialogue_or_music_preservation():
             pass
         else:
             raise AssertionError("invalid V1 audio policy was accepted")
+
+
+def _report_fixture(tmp_path, certified=True, include_artifacts=True):
+    paths = {
+        "output": tmp_path / "final.mp4",
+        "manifest": tmp_path / "final.json",
+        "subtitle": tmp_path / "final.srt",
+        "text_cleanup_report": tmp_path / "text-cleanup.json",
+        "speaker_identity_manifest": tmp_path / "speaker-identity.json",
+        "speaker_routing_manifest": tmp_path / "speaker-routing.json",
+    }
+    if include_artifacts:
+        for path in paths.values():
+            path.write_text("artifact", encoding="utf-8")
+    certification = {"certified": certified, "reason": None if certified else "provider mismatch"}
+    evidence = {
+        "speaker_identity_status": "SUCCEEDED",
+        "speaker_count": 3,
+        "mood": "dramatic",
+        "lip_sync": {"applied": True},
+        "voice_engine": "xtts-v2-reference-cloned",
+        "character_voice_profiles": ["bn_c01_f_young"],
+        "audio_mix": "replacement-dialogue-only-no-original-music",
+        "original_dialogue_in_final": False,
+        "music": {"enabled": False},
+        "source_text_cleanup": "ocr-guided-easyocr-opencv-inpaint",
+        "speaker_routing": "diarized-speaker-to-character-to-voice-profile/reference-audio",
+        "stt_provider": "local-whisper",
+        "stt_model": "large-v3",
+        "tts_provider": "xtts-v2",
+    }
+    return build_evidence_report(
+        certification, evidence, paths, "sha256" if certified else None,
+        identity_payload={"identity": {"status": "SUCCEEDED", "speaker_count": 3}},
+        language="Bangla", mood="dramatic", lip=True,
+    )
+
+
+def test_generated_notebook_embeds_evidence_report_contract():
+    notebook = build_notebook("https://example.test/video.mp4", "ajfaysal/smart-ai-social-automation-agent", "main", "Bangla")
+    source = "".join(notebook["cells"][0]["source"])
+    assert "def build_evidence_report(" in source
+    assert "manifest_evidence = {}" in source
+    assert "Path(value)" in source
+    assert "'stt_provider': 'whisper-large-v3'" not in source
+    assert "stt_model" in source
+
+
+def test_evidence_report_certified_is_derived_from_manifest(tmp_path):
+    report = _report_fixture(tmp_path, certified=True)
+    assert report["status"] == "certified"
+    assert report["output"] is not None
+    assert report["stt_provider"] == "local-whisper"
+    assert report["stt_model"] == "large-v3"
+    assert report["tts_provider"] == "xtts-v2"
+    assert report["original_dialogue_removed"] is True
+    assert report["original_music_removed"] is True
+
+
+def test_evidence_report_failed_marks_evidence_dependent_claims_unknown(tmp_path):
+    report = _report_fixture(tmp_path, certified=False)
+    assert report["status"] == "failed_closed"
+    assert report["stt_provider"] == "unknown"
+    assert report["tts_provider"] == "unknown"
+    assert report["original_dialogue_removed"] == "unknown"
+    assert report["speaker_count"] == "unknown"
+
+
+def test_evidence_report_missing_artifacts_does_not_report_paths(tmp_path):
+    report = _report_fixture(tmp_path, certified=True, include_artifacts=False)
+    assert report["status"] == "certified"
+    assert report["output"] is None
+    assert report["manifest"] is None
+    assert report["subtitle"] is None
+    assert report["speaker_identity_manifest"] is None
+
+
+def test_evidence_report_provider_mismatch_is_not_certified(tmp_path):
+    report = _report_fixture(tmp_path, certified=False)
+    report["certification"]["reason"] = "certification failed: STT provider contract mismatch: expected local-whisper"
+    assert report["status"] == "failed_closed"
+    assert report["stt_provider"] == "unknown"
+    assert "provider contract mismatch" in report["certification"]["reason"]
