@@ -12,6 +12,7 @@ from speaker_identity import CharacterIdentity, SpeakerTurn, normalize_speaker_i
 class SpeakerVoiceRoute:
     speaker_id: str
     character_id: str
+    gender_hint: str
     voice_profile: str | None
     reference_audio: str | None
     reference_qc: ReferenceVoiceQC | None
@@ -25,7 +26,7 @@ def build_voice_routes(
     voice_profiles: dict[str, str] | None = None,
     minimum_confidence: float = 0.70,
 ) -> dict[str, SpeakerVoiceRoute]:
-    """Build a deterministic speaker->character->voice handoff with QC evidence."""
+    """Build a deterministic speaker->character->voice handoff with auditable gender hints."""
     voice_profiles = voice_profiles or {}
     active = {normalize_speaker_id(t.speaker_id) for t in turns}
     routes: dict[str, SpeakerVoiceRoute] = {}
@@ -36,6 +37,7 @@ def build_voice_routes(
         routes[sid] = SpeakerVoiceRoute(
             speaker_id=sid,
             character_id=identity.character_id,
+            gender_hint=str(identity.gender_hint or "unknown").strip().lower() or "unknown",
             voice_profile=voice_profiles.get(identity.character_id),
             reference_audio=identity.reference_audio,
             reference_qc=identity.reference_qc,
