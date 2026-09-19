@@ -46,22 +46,45 @@ jobs:
         run: |
           mkdir -p validation-artifacts
           printf 'selected_provider=dry-run\nstatus=contract-tests-only\n' > validation-artifacts/profile.txt
-      - name: Run Demucs production profile
+      - name: Preflight Demucs input
         if: inputs.provider == 'demucs'
         env:
           MEDIA_PATH: ${{ inputs.media_path }}
         run: |
           test -n "$MEDIA_PATH" || { echo 'media_path is required for demucs'; exit 2; }
-          mkdir -p validation-artifacts
-          python real_provider_runner.py demucs --audio "$MEDIA_PATH" --work provider-validation-work > validation-artifacts/validation.json
-      - name: Run MediaPipe production profile
+          test -f "$MEDIA_PATH" || { echo "Demucs input file does not exist: $MEDIA_PATH"; exit 2; }
+          mkdir -p validation-artifacts provider-validation-work
+      - name: Run Demucs production profile
+        if: inputs.provider == 'demucs'
+        env:
+          MEDIA_PATH: ${{ inputs.media_path }}
+        run: python real_provider_runner.py demucs --audio "$MEDIA_PATH" --work provider-validation-work > validation-artifacts/validation.json
+      - name: Preflight MediaPipe input
         if: inputs.provider == 'mediapipe'
         env:
           MEDIA_PATH: ${{ inputs.media_path }}
         run: |
           test -n "$MEDIA_PATH" || { echo 'media_path is required for mediapipe'; exit 2; }
-          mkdir -p validation-artifacts
-          MOUTH_LANDMARK_PROVIDER=mediapipe python real_provider_runner.py mediapipe --image "$MEDIA_PATH" > validation-artifacts/validation.json
+          test -f "$MEDIA_PATH" || { echo "MediaPipe input image does not exist: $MEDIA_PATH"; exit 2; }
+          mkdir -p validation-artifacts provider-validation-work
+      - name: Run MediaPipe production profile
+        if: inputs.provider == 'mediapipe'
+        env:
+          MEDIA_PATH: ${{ inputs.media_path }}
+        run: MOUTH_LANDMARK_PROVIDER=mediapipe python real_provider_runner.py mediapipe --image "$MEDIA_PATH" > validation-artifacts/validation.json
+      - name: Preflight Wav2Lip inputs
+        if: inputs.provider == 'wav2lip'
+        env:
+          VIDEO_PATH: ${{ inputs.media_path }}
+          AUDIO_PATH: ${{ inputs.audio_path }}
+          OUTPUT_PATH: ${{ inputs.output_path }}
+        run: |
+          test -n "$VIDEO_PATH" || { echo 'media_path is required for wav2lip video'; exit 2; }
+          test -f "$VIDEO_PATH" || { echo "Wav2Lip video does not exist: $VIDEO_PATH"; exit 2; }
+          test -n "$AUDIO_PATH" || { echo 'audio_path is required for wav2lip'; exit 2; }
+          test -f "$AUDIO_PATH" || { echo "Wav2Lip audio does not exist: $AUDIO_PATH"; exit 2; }
+          test -n "$OUTPUT_PATH" || { echo 'output_path is required for wav2lip'; exit 2; }
+          mkdir -p validation-artifacts provider-validation-work "$(dirname "$OUTPUT_PATH")"
       - name: Run Wav2Lip production profile
         if: inputs.provider == 'wav2lip'
         env:
@@ -69,11 +92,7 @@ jobs:
           AUDIO_PATH: ${{ inputs.audio_path }}
           OUTPUT_PATH: ${{ inputs.output_path }}
           LIPSYNC_PROVIDER: wav2lip
-        run: |
-          test -n "$VIDEO_PATH" || { echo 'media_path is required for wav2lip video'; exit 2; }
-          test -n "$AUDIO_PATH" || { echo 'audio_path is required for wav2lip'; exit 2; }
-          mkdir -p validation-artifacts
-          python real_provider_runner.py wav2lip --video "$VIDEO_PATH" --audio "$AUDIO_PATH" --output "$OUTPUT_PATH" > validation-artifacts/validation.json
+        run: python real_provider_runner.py wav2lip --video "$VIDEO_PATH" --audio "$AUDIO_PATH" --output "$OUTPUT_PATH" > validation-artifacts/validation.json
       - name: Upload validation report
         if: always()
         uses: actions/upload-artifact@v4
