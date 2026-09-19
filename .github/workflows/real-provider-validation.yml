@@ -76,6 +76,7 @@ jobs:
         if: inputs.provider == 'whisper'
         env:
           MEDIA_PATH: ${{ inputs.media_path }}
+          WHISPER_LOCAL_COMMAND: ${{ secrets.WHISPER_LOCAL_COMMAND }}
         run: |
           test -n "$MEDIA_PATH" || { echo 'media_path is required for whisper'; exit 2; }
           test -f "$MEDIA_PATH" || { echo "Whisper audio does not exist: $MEDIA_PATH"; exit 2; }
@@ -95,6 +96,7 @@ jobs:
           TEXT_PATH: ${{ inputs.text_path }}
           REFERENCE_PATH: ${{ inputs.reference_path }}
           OUTPUT_PATH: ${{ inputs.output_path }}
+          XTTS_V2_TTS_COMMAND: ${{ secrets.XTTS_V2_TTS_COMMAND }}
         run: |
           test -n "$TEXT_PATH" || { echo 'text_path is required for xtts-v2'; exit 2; }
           test -f "$TEXT_PATH" || { echo "XTTS text file does not exist: $TEXT_PATH"; exit 2; }
