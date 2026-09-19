@@ -68,12 +68,21 @@ jobs:
           TARGET_LANGUAGE: ${{ inputs.language }}
           KERNEL_SLUG: ${{ inputs.kernel_slug }}
         run: |
-          test -n "$KAGGLE_API_TOKEN" || { echo "Missing GitHub secret KAGGLE_API_TOKEN"; exit 2; }
-          python kaggle_gpu_orchestrator.py \
-            --video-url "$VIDEO_URL" \
-            --language "$TARGET_LANGUAGE" \
-            --kernel-slug "$KERNEL_SLUG" \
-            --dispatch-only
+          set +e
+          echo "Kaggle CLI version:"
+          python -m kaggle --version
+          echo "Dispatch metadata: kernel=ajfaysal/$KERNEL_SLUG language=$TARGET_LANGUAGE"
+          echo "KAGGLE_API_TOKEN is present: $([ -n "$KAGGLE_API_TOKEN" ] && echo yes || echo no)"
+          echo "Running dispatch command with stdout/stderr capture..."
+          python kaggle_gpu_orchestrator.py             --video-url "$VIDEO_URL"             --language "$TARGET_LANGUAGE"             --kernel-slug "$KERNEL_SLUG"             --dispatch-only             >"$RUNNER_TEMP/kaggle-dispatch.log" 2>&1
+          status=$?
+          echo "===== Kaggle dispatch diagnostic log ====="
+          cat "$RUNNER_TEMP/kaggle-dispatch.log"
+          echo "===== End Kaggle dispatch diagnostic log ====="
+          if [ "$status" -ne 0 ]; then
+            echo "Kaggle dispatch failed with exit code $status"
+            exit "$status"
+          fi
       - name: Publish dispatch metadata
         env:
           VIDEO_URL: ${{ inputs.video_url }}
@@ -111,10 +120,7 @@ jobs:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
           KERNEL_SLUG: ${{ inputs.kernel_slug }}
         run: |
-          python kaggle_certification_operator.py "ajfaysal/$KERNEL_SLUG" \
-            --timeout 3600 \
-            --poll 30 \
-            --output-dir kaggle-certification-output
+          python kaggle_certification_operator.py "ajfaysal/$KERNEL_SLUG"             --timeout 3600             --poll 30             --output-dir kaggle-certification-output
       - name: Upload certification artifacts
         if: always()
         uses: actions/upload-artifact@v4
