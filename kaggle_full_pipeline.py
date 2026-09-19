@@ -37,6 +37,12 @@ except Exception:
 
 os.environ['OPENAI_API_KEY'] = secret('OPENAI_API_KEY', required=True)
 os.environ['REQUIRE_REFERENCE_VOICE_CLONING'] = secret('REQUIRE_REFERENCE_VOICE_CLONING', required=True).strip().lower() or 'true'
+# Real runtime contract: V1 STT is Whisper large-v3, and reference TTS is XTTS-v2.
+os.environ['DUBBING_STT_PROVIDER'] = 'local-whisper'
+os.environ['DUBBING_STT_MODEL'] = 'large-v3'
+os.environ['WHISPER_LOCAL_COMMAND'] = secret('WHISPER_LOCAL_COMMAND', required=True)
+os.environ['XTTS_V2_TTS_COMMAND'] = secret('XTTS_V2_TTS_COMMAND', required=True)
+os.environ['VOICE_ENGINE_PREFERENCE'] = 'xtts-v2'
 for _env in ('COSYVOICE_TTS_COMMAND','FISH_SPEECH_TTS_COMMAND','GPT_SOVITS_TTS_COMMAND','OPENVOICE_TTS_COMMAND'):
     _value = secret(_env, required=False)
     if _value:
@@ -154,6 +160,7 @@ def natural_bangla_tts(text, out_path, voice, emotion, character_id=None, refere
         profile=voice,
         character_id=character_id,
         reference_audio=reference_audio,
+        preferred_engine='xtts-v2',
         acting_directive=acting_directive,
     )
 
@@ -211,13 +218,15 @@ report = {
     'speaker_count': identity_payload['identity'].get('speaker_count', 0),
     'mood': mood,
     'lip_sync': lip,
-    'voice_engine': 'multi-engine-bangla' if __LANGUAGE__ == 'Bangla' else 'canonical-openai',
+    'voice_engine': 'xtts-v2-reference-cloned' if __LANGUAGE__ == 'Bangla' else 'canonical-openai',
     'character_voice_profiles': BANGLA_CHARACTER_VOICE_POOL if __LANGUAGE__ == 'Bangla' else [],
     'audio_mix': 'replacement-dialogue-only-no-original-music',
     'original_dialogue_removed': True,
     'original_music_removed': True,
     'source_text_cleanup': 'ocr-guided-easyocr-opencv-inpaint',
     'speaker_routing': 'diarized-speaker-to-character-to-voice-profile/reference-audio',
+    'stt_provider': 'whisper-large-v3',
+    'tts_provider': 'xtts-v2',
 }
 (ARTIFACTS / 'cloud-provider-certification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
 print(json.dumps(report, ensure_ascii=False, indent=2))
