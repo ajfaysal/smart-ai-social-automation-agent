@@ -32,12 +32,18 @@ def _probe(path: Path) -> dict[str, Any]:
     return {"duration_seconds": duration, "streams": sorted(streams)}
 
 
-def certify(final_video: Path, manifest: dict[str, Any], *, source_language: str = "Chinese (Simplified)", target_language: str) -> dict[str, Any]:
+def certify(final_video: Path, manifest: dict[str, Any], *, source_language: str = "Chinese (Simplified)", target_language: str, expected_stt_provider: str | None = None, expected_tts_provider: str | None = None, require_reference_voice_cloning: bool = False) -> dict[str, Any]:
     if source_language not in {"Chinese (Simplified)", "Chinese (Traditional)"}:
         raise RuntimeError("certification failed: source is not Chinese")
     if target_language not in TARGETS:
         raise RuntimeError(f"certification failed: unsupported target {target_language}")
     artifact = _probe(final_video)
+    if expected_stt_provider is not None and manifest.get("stt_provider") != expected_stt_provider:
+        raise RuntimeError(f"certification failed: STT provider contract mismatch: expected {expected_stt_provider}")
+    if expected_tts_provider is not None and manifest.get("tts_provider") != expected_tts_provider:
+        raise RuntimeError(f"certification failed: TTS provider contract mismatch: expected {expected_tts_provider}")
+    if require_reference_voice_cloning and manifest.get("reference_voice_cloning") is not True:
+        raise RuntimeError("certification failed: reference voice cloning is not proven")
     if (manifest.get("quality_control") or {}).get("status") != "pass":
         raise RuntimeError("certification failed: final QC is not pass")
     if manifest.get("original_dialogue_in_final") is not False:

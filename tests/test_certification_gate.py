@@ -13,6 +13,9 @@ def manifest(**overrides):
         "lip_sync": {"applied": True},
         "shot_qc": {"status": "pass"},
         "segments": [{"character": "C1", "voice": "nova", "reference_audio": "/runtime/C1.wav", "reference_qc": {"status": "SUCCEEDED"}, "reference_selection_score": [2.0, 0.9, -1.0], "timing_lock": True, "routing_status": "SUCCEEDED"}],
+        "stt_provider": "local-whisper",
+        "tts_provider": "xtts-v2",
+        "reference_voice_cloning": True,
         "provider_execution": {
             name: {"state": "succeeded", "applied": True, "reason": "artifact_valid"}
             for name in gate.REQUIRED_PROVIDERS
@@ -108,3 +111,16 @@ def test_certification_fails_when_provider_artifact_was_not_validated(monkeypatc
     providers["tts"] = dict(providers["tts"], reason="provider_ok")
     with pytest.raises(RuntimeError, match="strictly succeeded/applied"):
         gate.certify(video, manifest(provider_execution=providers), target_language="Bangla")
+
+
+def test_certification_enforces_v1_provider_contract(monkeypatch, tmp_path):
+    video = tmp_path / "final.mp4"
+    video.write_bytes(b"real")
+    monkeypatch.setattr(gate, "_probe", lambda p: {"duration_seconds": 10.0, "streams": ["audio", "video"]})
+    with pytest.raises(RuntimeError, match="STT provider contract"):
+        gate.certify(video, manifest(stt_provider="openai"), target_language="Bangla", expected_stt_provider="local-whisper", expected_tts_provider="xtts-v2", require_reference_voice_cloning=True)
+    with pytest.raises(RuntimeError, match="TTS provider contract"):
+        gate.certify(video, manifest(tts_provider="openai"), target_language="Bangla", expected_stt_provider="local-whisper", expected_tts_provider="xtts-v2", require_reference_voice_cloning=True)
+    with pytest.raises(RuntimeError, match="reference voice cloning"):
+        gate.certify(video, manifest(reference_voice_cloning=False), target_language="Bangla", expected_stt_provider="local-whisper", expected_tts_provider="xtts-v2", require_reference_voice_cloning=True)
+    assert gate.certify(video, manifest(), target_language="Bangla", expected_stt_provider="local-whisper", expected_tts_provider="xtts-v2", require_reference_voice_cloning=True)["certified"] is True
