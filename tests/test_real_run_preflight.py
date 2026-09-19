@@ -60,3 +60,23 @@ def test_reference_voice_preflight_accepts_configured_engine(monkeypatch):
     monkeypatch.setenv("FISH_SPEECH_TTS_COMMAND", "fish --text {text} --output {output} --reference {reference}")
     result=build_preflight(video_url="https://example.com/drama.mp4", require_openai=False, require_wav2lip=False, require_diarization=False, require_reference_voice=True)
     assert result.ready
+
+
+def test_real_run_rejects_private_video_url():
+    with pytest.raises(ValueError, match="public HTTP"):
+        build_preflight(video_url="http://127.0.0.1/drama.mp4", require_openai=False, require_wav2lip=False, require_diarization=False)
+
+
+def test_real_run_rejects_invalid_wav2lip_urls(monkeypatch):
+    monkeypatch.setenv("WAV2LIP_CHECKPOINT_URL", "file:///tmp/wav2lip.pth")
+    monkeypatch.setenv("WAV2LIP_S3FD_URL", "https://example.com/s3fd.pth")
+    result = build_preflight(video_url="https://example.com/drama.mp4", require_openai=False, require_diarization=False)
+    assert not result.ready
+    assert "invalid WAV2LIP_CHECKPOINT_URL" in result.missing_runtime
+
+
+def test_real_run_accepts_public_model_urls(monkeypatch):
+    monkeypatch.setenv("WAV2LIP_CHECKPOINT_URL", "https://example.com/wav2lip.pth")
+    monkeypatch.setenv("WAV2LIP_S3FD_URL", "https://example.com/s3fd.pth")
+    result = build_preflight(video_url="https://drive.google.com/file/d/example/view", require_openai=False, require_diarization=False)
+    assert result.ready
