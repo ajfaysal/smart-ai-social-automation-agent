@@ -21,7 +21,7 @@ Real model-backed execution is intentionally opt-in. Configure the provider on a
 
 A missing, malformed, too-small, or otherwise invalid artifact must remain `FAILED`; it must never be reported as applied.
 
-The current GitHub Actions workflow is a safe contract-validation profile. It does not pretend that GitHub-hosted CI has executed heavyweight model inference. Actual model-backed validation should be run only when the required dependencies, model weights, and hardware are deliberately provisioned.
+The GitHub Actions workflow supports an explicit `runner_label` input. Keep `ubuntu-latest` for the credential-free contract profile; for real provider execution, select a self-hosted/provisioned runner label that already contains the required dependencies, model weights, hardware, and runner-local media. The workflow never downloads heavyweight models or treats runner selection as provider success.
 
 
 ## Operator checklist
@@ -68,7 +68,7 @@ Expected result: the rendered MP4 exists, passes the media validation, and the p
 
 ## GitHub Actions profile
 
-The **Real Provider Validation** workflow is an operator-triggered contract runner. It does not install heavyweight model packages or expose provider credentials. The `dry-run` option is safe for ordinary CI-style verification; the provider-specific options require the selected runner to already contain the requested media, command, and model dependencies.
+The **Real Provider Validation** workflow is an operator-triggered contract runner. It does not install heavyweight model packages or expose provider credentials. The `dry-run` option is safe for ordinary CI-style verification on `ubuntu-latest`; provider-specific options should use a self-hosted/provisioned `runner_label` whose filesystem contains the requested media and whose environment contains the command, model, and hardware dependencies. Runner selection is recorded in the validation artifact.
 
 Validation artifacts include the JSON report and the provider work/output directory. Missing artifacts cause the upload step to fail instead of being silently ignored.
 
