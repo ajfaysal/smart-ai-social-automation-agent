@@ -56,8 +56,6 @@ os.environ['MOUTH_LANDMARK_PROVIDER'] = 'mediapipe'
 
 subprocess.run(['git', 'clone', '--depth', '1', '--branch', __REF__, 'https://github.com/__REPO__.git', str(REPO)], check=True)
 subprocess.run(['pip', 'install', '-r', 'requirements.txt', '-r', 'requirements-cloud-runner.txt'], cwd=REPO, check=True)
-if __LANGUAGE__ == 'Bangla':
-    subprocess.run(['pip', 'install', '-q', 'edge-tts>=7.0,<8'], check=True)
 subprocess.run(['python', 'run_cloud_smoke.py', __VIDEO_URL__, '--output', str(INPUT), '--report', str(REPO / 'validation-artifacts' / 'cloud-input.json')], cwd=REPO, check=True)
 
 cleanup_code = "from pathlib import Path; from scene_analysis import detect_shots; from video_text_cleaner import clean_video; p=Path('validation-input/source.mp4'); cuts=[x['time'] for x in detect_shots(p)]; clean_video(p, Path('validation-input/cleaned-video.mp4'), Path('validation-artifacts/text-cleanup.json'), languages=['ch_sim','en'], scene_cuts=cuts)"
