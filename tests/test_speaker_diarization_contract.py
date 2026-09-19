@@ -18,12 +18,21 @@ def test_routes_normalize_speaker_labels_and_preserve_character_voice_identity()
 
     assert list(routes) == ["S01", "S02"]
     assert routes["S01"].character_id == "C01"
+    assert routes["S01"].gender_hint == "female"
     assert routes["S01"].voice_profile == "bn_c01_f_young"
     assert routes["S01"].reference_audio.endswith("S01.wav")
     assert routes["S01"].reference_qc.status == "SUCCEEDED"
     assert routes["S01"].reference_selection_score == (2.0, 0.96, 0.0)
+    assert route_manifest(routes)[0]["gender_hint"] == "female"
     assert route_manifest(routes)[0]["reference_selection_score"] == [2.0, 0.96, 0.0]
     assert route_manifest(routes)[1]["character_id"] == "C02"
+
+
+def test_gender_hint_normalizes_unknown_values():
+    turns = (SpeakerTurn("S01", 0, 2, 0.95),)
+    identities = {"S01": CharacterIdentity("C01", "S01", 0.95, None, "  UNKNOWN  ")}
+    route = build_voice_routes(turns, identities)["S01"]
+    assert route.gender_hint == "unknown"
 
 
 def test_low_confidence_identity_is_not_routed():
@@ -39,5 +48,6 @@ def test_segment_routes_carry_reference_qc_evidence():
     identities = {"S01": CharacterIdentity("C01", "S01", 0.95, "/runtime/refs/S01.wav", "female", qc, (2.0, 0.95, 0.0))}
     routes = build_voice_routes(turns, identities, {"C01": "bn_c01_f_young"})
     rows = build_segment_routes([{"speaker_id": "S01", "start": 0.0, "end": 2.0, "text": "hello"}], routes)
+    assert rows[0]["gender_hint"] == "female"
     assert rows[0]["reference_qc"].status == "SUCCEEDED"
     assert rows[0]["reference_selection_score"] == (2.0, 0.95, 0.0)
