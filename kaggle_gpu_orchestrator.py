@@ -45,7 +45,7 @@ def main() -> int:
             require_openai=False,
             require_wav2lip=False,
             require_diarization=False,
-            require_whisper_xtts=True,
+            require_whisper_xtts=False,
         )
     else:
         preflight = build_preflight(
