@@ -12,9 +12,9 @@ def manifest(**overrides):
         "music": {"enabled": False},
         "lip_sync": {"applied": True},
         "shot_qc": {"status": "pass"},
-        "segments": [{"character": "C1", "voice": "nova", "reference_audio": "/runtime/C1.wav", "reference_qc": {"status": "SUCCEEDED"}, "reference_selection_score": [2.0, 0.9, -1.0], "timing_lock": True}],
+        "segments": [{"character": "C1", "voice": "nova", "reference_audio": "/runtime/C1.wav", "reference_qc": {"status": "SUCCEEDED"}, "reference_selection_score": [2.0, 0.9, -1.0], "timing_lock": True, "routing_status": "SUCCEEDED"}],
         "provider_execution": {
-            name: {"state": "succeeded", "applied": True}
+            name: {"state": "succeeded", "applied": True, "reason": "artifact_valid"}
             for name in gate.REQUIRED_PROVIDERS
         },
     }
