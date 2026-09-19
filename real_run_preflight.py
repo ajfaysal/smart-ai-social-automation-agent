@@ -53,6 +53,7 @@ def build_preflight(
     require_diarization: bool = True,
     diarization_backend: str = "pyannote",
     require_reference_voice: bool = False,
+    require_whisper_xtts: bool = False,
 ) -> RealRunPreflight:
     selection = validate_v1_selection(source_language, target_language)
     video_url = str(video_url).strip()
@@ -72,6 +73,11 @@ def build_preflight(
             value = os.getenv(name, "").strip()
             if value and not _is_public_http_url(value):
                 runtime.append(f"invalid {name}")
+    if require_whisper_xtts:
+        if not os.getenv("WHISPER_LOCAL_COMMAND", "").strip():
+            runtime.append("WHISPER_LOCAL_COMMAND")
+        if not os.getenv("XTTS_V2_TTS_COMMAND", "").strip():
+            runtime.append("XTTS_V2_TTS_COMMAND")
     if require_reference_voice:
         reference_keys = (
             "BANGLA_REFERENCE_TTS_COMMAND",
