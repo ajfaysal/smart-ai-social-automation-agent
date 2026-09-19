@@ -45,6 +45,7 @@ def main() -> int:
             require_openai=False,
             require_wav2lip=False,
             require_diarization=False,
+            require_whisper_xtts=True,
         )
     else:
         preflight = build_preflight(
@@ -53,6 +54,7 @@ def main() -> int:
             require_openai=not args.dry_run,
             require_wav2lip=not args.dry_run,
             require_diarization=not args.dry_run,
+            require_whisper_xtts=not args.dry_run,
         )
     if not preflight.ready:
         print(json.dumps({"ready": False, "missing_secrets": preflight.missing_secrets, "missing_runtime": preflight.missing_runtime}, ensure_ascii=False))
