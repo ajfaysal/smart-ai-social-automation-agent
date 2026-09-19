@@ -69,6 +69,7 @@ INPUT = REPO / 'validation-input' / 'source.mp4'
 CLEAN_VIDEO = REPO / 'validation-input' / 'cleaned-video.mp4'
 CLEAN_REPORT = REPO / 'validation-artifacts' / 'text-cleanup.json'
 ARTIFACTS = Path('/kaggle/working/final-artifacts')
+REPLACEMENT_AUDIO_MIX_POLICY = 'replacement-dialogue-only-no-original-music'
 ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
 try:
