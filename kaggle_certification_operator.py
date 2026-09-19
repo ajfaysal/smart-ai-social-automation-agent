@@ -110,6 +110,22 @@ def validate_downloaded_artifacts(output_dir: Path) -> dict:
     return {"certification": data, "final_video": str(final_video), "final_video_sha256": digest, "manifest": str(manifest), "evidence": sorted(required), "cloud_report": str(report_files[0])}
 
 
+def write_failure_evidence(output_dir: Path, *, kernel: str, state: str, reason: str) -> dict:
+    failure = {
+        "certified": False,
+        "state": state,
+        "kernel": kernel,
+        "reason": reason,
+        "output_dir": str(output_dir),
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "certification-failure.json").write_text(
+        json.dumps(failure, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return failure
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("kernel")
@@ -125,25 +141,26 @@ def main() -> int:
         state = classify_status(raw)
 
     print(json.dumps({"kernel": args.kernel, "state": state, "status": raw}, ensure_ascii=False, indent=2))
+    output_dir = Path(args.output_dir)
     if state != "completed":
+        failure = write_failure_evidence(
+            output_dir,
+            kernel=args.kernel,
+            state=state,
+            reason=f"Kaggle kernel did not complete successfully: {state}",
+        )
+        print(json.dumps(failure, ensure_ascii=False, indent=2))
         return 2
 
-    output_dir = Path(args.output_dir)
     try:
         download_output(args.kernel, output_dir)
         evidence = validate_downloaded_artifacts(output_dir)
     except Exception as exc:
-        failure = {
-            "certified": False,
-            "state": state,
-            "kernel": args.kernel,
-            "reason": str(exc),
-            "output_dir": str(output_dir),
-        }
-        output_dir.mkdir(parents=True, exist_ok=True)
-        (output_dir / "certification-failure.json").write_text(
-            json.dumps(failure, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+        failure = write_failure_evidence(
+            output_dir,
+            kernel=args.kernel,
+            state=state,
+            reason=str(exc),
         )
         print(json.dumps(failure, ensure_ascii=False, indent=2))
         return 2
