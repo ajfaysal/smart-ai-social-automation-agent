@@ -76,3 +76,20 @@ def finalize(provider: str, *, configured: bool, attempted: bool,
 
 def write_snapshot(path: Path) -> None:
     path.write_text(json.dumps(snapshot(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def summarize_provider_executions(executions: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Return deterministic aggregate provider audit data for final QC."""
+    data = executions if executions is not None else snapshot()
+    states = {name: str(item.get("state", "")) for name, item in data.items()}
+    counts = {state: sum(value == state for value in states.values()) for state in (
+        "unavailable", "configured", "attempted", "succeeded", "failed", "skipped"
+    )}
+    applied = sorted(name for name, item in data.items() if type(item.get("applied")) is bool and item.get("applied") is True)
+    return {
+        "provider_count": len(data),
+        "state_counts": counts,
+        "terminal_count": counts["unavailable"] + counts["succeeded"] + counts["failed"] + counts["skipped"],
+        "applied_providers": applied,
+        "all_terminal": all(state in {"unavailable", "succeeded", "failed", "skipped"} for state in states.values()),
+    }

@@ -2,7 +2,7 @@ import json, os, shutil, subprocess, tempfile, uuid
 from pathlib import Path
 from multilingual_voice_routing import voice_for_character
 from demucs_provider import separate as audited_demucs_separate
-from provider_runtime import finalize, record, reset_provider_executions, snapshot
+from provider_runtime import finalize, record, reset_provider_executions, snapshot, summarize_provider_executions
 from provider_evidence_qc import ingest_provider_evidence
 import requests
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -178,7 +178,11 @@ def dub_video(video_path,target_language,requested_voice="auto",preserve_backgro
             output=OUTPUT_DIR/f"dubbed_{LANGUAGES[target_language]}_{uuid.uuid4().hex[:10]}.mp4"; shutil.copy2(prepared,output)
         if lip_result and lip_result.get("applied") is True:
             finalize("lip_sync",configured=True,attempted=True,artifact=output,min_bytes=1024,suffix=".mp4",capabilities=["shot_aware_video_lip_sync"])
+        elif lip_sync:
+            record(__import__("provider_reliability").skipped("lip_sync", "lip-sync was requested but prerequisites were unavailable."))
+        else:
+            record(__import__("provider_reliability").skipped("lip_sync", "lip-sync was not requested."))
         if not finalize("final_assembly",configured=True,attempted=True,artifact=output,min_bytes=1024,suffix=".mp4",capabilities=["video_audio_mux","final_render"]).applied: raise RuntimeError("Final assembly artifact validation failed.")
-        qc=validate_output(output,total,manifest); final_manifest={"version":"2.6.1","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":bool(background),"background_method":"demucs-two-stems" if background else "none","music":{"enabled":bool(music),"dominant_mood":dominant,"license":"original_procedural" if music else None},"mastering":{"target_lufs":-16,"true_peak_db":-1.5},"lip_sync":lip_result or {"applied":False,"provider":"disabled","reason":"Not requested."},"shot_qc":shot_qc,"quality_control":qc,"provider_execution":snapshot(),"segments":manifest}
+        qc=validate_output(output,total,manifest); qc["provider_execution"] = summarize_provider_executions(); final_manifest={"version":"2.6.1","timing_mode":"frame-locked","voice_mode":"character-stable","emotion_mode":"directed","original_dialogue_in_final":False,"background_preserved":bool(background),"background_method":"demucs-two-stems" if background else "none","music":{"enabled":bool(music),"dominant_mood":dominant,"license":"original_procedural" if music else None},"mastering":{"target_lufs":-16,"true_peak_db":-1.5},"lip_sync":lip_result or {"applied":False,"provider":"disabled","reason":"Not requested."},"shot_qc":shot_qc,"quality_control":qc,"provider_execution":snapshot(),"segments":manifest}
         json_path=OUTPUT_DIR/f"{output.stem}.json"; json_path.write_text(json.dumps(final_manifest,ensure_ascii=False,indent=2),encoding="utf-8"); write_srt(manifest,OUTPUT_DIR/f"{output.stem}.srt"); return output,dominant,lip_result
     finally: shutil.rmtree(work,ignore_errors=True)
