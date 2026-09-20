@@ -43,6 +43,15 @@ def _is_http_url(value: str) -> bool:
     return _is_public_http_url(value)
 
 
+def selected_text_provider() -> tuple[str, str]:
+    """Return configured text provider and its required API-key environment name."""
+    provider = os.getenv("DUBBING_TEXT_PROVIDER", "openai").strip().lower()
+    keys = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY"}
+    if provider not in keys:
+        raise ValueError(f"Unsupported DUBBING_TEXT_PROVIDER: {provider}")
+    return provider, keys[provider]
+
+
 def build_preflight(
     *,
     video_url: str,
@@ -62,7 +71,8 @@ def build_preflight(
 
     required = []
     if require_openai:
-        required.append("OPENAI_API_KEY")
+        _, provider_key = selected_text_provider()
+        required.append(provider_key)
     if require_wav2lip:
         required.extend(("WAV2LIP_CHECKPOINT_URL", "WAV2LIP_S3FD_URL"))
     missing = tuple(name for name in required if not os.getenv(name, "").strip())
