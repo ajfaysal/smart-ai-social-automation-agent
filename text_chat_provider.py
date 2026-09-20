@@ -44,7 +44,8 @@ def chat_completion(messages: list[dict[str, str]], *, temperature: float = 0.2,
         timeout=timeout,
     )
     if not response.ok:
-        raise TextProviderError(f"Text provider request failed ({response.status_code}): {response.text[:1000]}")
+        # Provider error bodies may echo sensitive request details; do not log/raise them.
+        raise TextProviderError(f"Text provider request failed with HTTP {response.status_code}")
     try:
         content = response.json()["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError) as exc:
