@@ -37,14 +37,19 @@ def _provider_config() -> tuple[str, str, str]:
 def chat_completion(messages: list[dict[str, str]], *, temperature: float = 0.2, timeout: int = 180, session: Any = requests) -> str:
     """Return assistant text from an OpenAI-compatible text chat endpoint."""
     base_url, key, model = _provider_config()
-    response = session.post(
-        f"{base_url}/chat/completions",
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        json={"model": model, "messages": messages, "temperature": temperature},
-        timeout=timeout,
-    )
+    try:
+        response = session.post(
+            f"{base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={"model": model, "messages": messages, "temperature": temperature},
+            timeout=timeout,
+        )
+    except requests.RequestException as exc:
+        # Avoid echoing exception text: request errors may contain sensitive URL details.
+        raise TextProviderError("Text provider request failed at transport layer") from exc
     if not response.ok:
-        raise TextProviderError(f"Text provider request failed ({response.status_code}): {response.text[:1000]}")
+        # Provider bodies can contain request details; expose only status.
+        raise TextProviderError(f"Text provider request failed (HTTP {response.status_code})")
     try:
         content = response.json()["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError) as exc:
